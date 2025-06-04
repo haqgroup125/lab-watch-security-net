@@ -1,54 +1,43 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Bell, Smartphone, Server, Clock, AlertTriangle, CheckCircle, Volume2 } from "lucide-react";
+import { useSecuritySystem } from "@/hooks/useSecuritySystem";
+import { supabase } from "@/integrations/supabase/client";
 
 const AlertMonitor = () => {
   const [serverStatus, setServerStatus] = useState("running");
   const [alertsEnabled, setAlertsEnabled] = useState(true);
+  const { alerts, fetchAlerts } = useSecuritySystem();
 
-  const alerts = [
-    {
-      id: 1,
-      time: "14:32:15",
-      type: "Unauthorized Access",
-      source: "Mobile App 1",
-      target: ["Mobile App 2", "ESP32"],
-      severity: "high",
-      status: "delivered",
-      details: "Unknown face detected in main entrance"
-    },
-    {
-      id: 2,
-      time: "12:15:43",
-      type: "Motion Detection",
-      source: "ESP32 IR Sensor",
-      target: ["Mobile App 2"],
-      severity: "medium",
-      status: "delivered",
-      details: "Movement detected after hours"
-    },
-    {
-      id: 3,
-      time: "09:43:22",
-      type: "System Test",
-      source: "Mobile App 1",
-      target: ["Mobile App 2", "ESP32"],
-      severity: "low",
-      status: "delivered",
-      details: "Scheduled system functionality test"
-    },
-  ];
+  useEffect(() => {
+    // Set up real-time subscription for alerts
+    const channel = supabase
+      .channel('alert-changes')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'security_alerts'
+      }, () => {
+        fetchAlerts();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchAlerts]);
 
   const serverStats = {
     port: "8080",
     uptime: "2d 14h 32m",
-    requests: 1247,
-    errors: 2
+    requests: alerts.length,
+    errors: alerts.filter(alert => alert.severity === 'high').length
   };
+
+  const latestAlert = alerts[0];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -76,11 +65,11 @@ const AlertMonitor = () => {
               <div className="font-mono text-green-400">{serverStats.uptime}</div>
             </div>
             <div>
-              <div className="text-slate-400">Requests</div>
+              <div className="text-slate-400">Alerts</div>
               <div className="font-mono text-white">{serverStats.requests}</div>
             </div>
             <div>
-              <div className="text-slate-400">Errors</div>
+              <div className="text-slate-400">High Priority</div>
               <div className="font-mono text-red-400">{serverStats.errors}</div>
             </div>
           </div>
@@ -156,28 +145,38 @@ const AlertMonitor = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {alerts[0] && (
+          {latestAlert ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Badge variant="destructive">{alerts[0].severity.toUpperCase()}</Badge>
-                <span className="text-sm text-slate-400">{alerts[0].time}</span>
+                <Badge variant={latestAlert.severity === 'high' ? "destructive" : latestAlert.severity === 'medium' ? "secondary" : "outline"}>
+                  {latestAlert.severity.toUpperCase()}
+                </Badge>
+                <span className="text-sm text-slate-400">
+                  {new Date(latestAlert.created_at).toLocaleTimeString()}
+                </span>
               </div>
               <div>
-                <div className="font-medium text-white">{alerts[0].type}</div>
-                <div className="text-sm text-slate-400 mt-1">{alerts[0].details}</div>
+                <div className="font-medium text-white">{latestAlert.alert_type}</div>
+                <div className="text-sm text-slate-400 mt-1">{latestAlert.details}</div>
               </div>
               <div className="text-sm">
                 <div className="text-slate-400">Source:</div>
-                <div className="text-white">{alerts[0].source}</div>
+                <div className="text-white">{latestAlert.source_device}</div>
               </div>
               <div className="text-sm">
-                <div className="text-slate-400">Targets:</div>
-                <div className="text-white">{alerts[0].target.join(", ")}</div>
+                <div className="text-slate-400">Detected:</div>
+                <div className="text-white">{latestAlert.detected_person || "Unknown"}</div>
               </div>
               <div className="flex items-center space-x-2">
                 <CheckCircle className="h-4 w-4 text-green-400" />
-                <span className="text-sm text-green-400">Successfully delivered</span>
+                <span className="text-sm text-green-400">Alert logged</span>
               </div>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <AlertTriangle className="h-12 w-12 text-slate-600 mx-auto mb-2" />
+              <p className="text-slate-400">No alerts yet</p>
+              <p className="text-sm text-slate-500">Recent alerts will appear here</p>
             </div>
           )}
         </CardContent>
@@ -189,7 +188,7 @@ const AlertMonitor = () => {
           <CardTitle className="flex items-center justify-between text-white">
             <div className="flex items-center space-x-2">
               <Clock className="h-5 w-5 text-blue-400" />
-              <span>Alert History</span>
+              <span>Alert History ({alerts.length})</span>
             </div>
             <Button variant="outline" size="sm">
               Export Logs
@@ -197,14 +196,19 @@ const AlertMonitor = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-80 overflow-y-auto">
             {alerts.map((alert) => (
               <div key={alert.id} className="flex items-center justify-between p-4 bg-slate-700 rounded-lg">
                 <div className="flex items-center space-x-4">
-                  <div className="text-sm text-slate-400 font-mono">{alert.time}</div>
+                  <div className="text-sm text-slate-400 font-mono">
+                    {new Date(alert.created_at).toLocaleString()}
+                  </div>
                   <div>
-                    <div className="font-medium text-white">{alert.type}</div>
+                    <div className="font-medium text-white">{alert.alert_type}</div>
                     <div className="text-sm text-slate-400">{alert.details}</div>
+                    <div className="text-sm text-slate-500">
+                      Source: {alert.source_device} | Person: {alert.detected_person || "Unknown"}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center space-x-3">
@@ -216,12 +220,19 @@ const AlertMonitor = () => {
                   >
                     {alert.severity}
                   </Badge>
-                  <Badge variant={alert.status === "delivered" ? "default" : "destructive"}>
-                    {alert.status}
+                  <Badge variant="default">
+                    logged
                   </Badge>
                 </div>
               </div>
             ))}
+            {alerts.length === 0 && (
+              <div className="text-center py-8">
+                <Clock className="h-12 w-12 text-slate-600 mx-auto mb-2" />
+                <p className="text-slate-400">No alerts logged yet</p>
+                <p className="text-sm text-slate-500">Alert history will appear here</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

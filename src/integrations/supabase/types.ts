@@ -9,7 +9,138 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      alert_receivers: {
+        Row: {
+          created_at: string
+          device_name: string
+          id: string
+          ip_address: unknown | null
+          last_heartbeat: string | null
+          port: number | null
+          status: string | null
+        }
+        Insert: {
+          created_at?: string
+          device_name: string
+          id?: string
+          ip_address?: unknown | null
+          last_heartbeat?: string | null
+          port?: number | null
+          status?: string | null
+        }
+        Update: {
+          created_at?: string
+          device_name?: string
+          id?: string
+          ip_address?: unknown | null
+          last_heartbeat?: string | null
+          port?: number | null
+          status?: string | null
+        }
+        Relationships: []
+      }
+      authorized_users: {
+        Row: {
+          created_at: string
+          face_encoding: Json | null
+          id: string
+          image_url: string | null
+          is_active: boolean | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          face_encoding?: Json | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          face_encoding?: Json | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      esp32_devices: {
+        Row: {
+          created_at: string
+          device_name: string
+          id: string
+          ip_address: unknown | null
+          last_seen: string | null
+          mac_address: string | null
+          status: string | null
+        }
+        Insert: {
+          created_at?: string
+          device_name: string
+          id?: string
+          ip_address?: unknown | null
+          last_seen?: string | null
+          mac_address?: string | null
+          status?: string | null
+        }
+        Update: {
+          created_at?: string
+          device_name?: string
+          id?: string
+          ip_address?: unknown | null
+          last_seen?: string | null
+          mac_address?: string | null
+          status?: string | null
+        }
+        Relationships: []
+      }
+      security_alerts: {
+        Row: {
+          acknowledged: boolean | null
+          acknowledged_at: string | null
+          alert_type: string
+          confidence_score: number | null
+          created_at: string
+          details: string | null
+          detected_person: string | null
+          id: string
+          image_url: string | null
+          severity: string
+          source_device: string
+        }
+        Insert: {
+          acknowledged?: boolean | null
+          acknowledged_at?: string | null
+          alert_type: string
+          confidence_score?: number | null
+          created_at?: string
+          details?: string | null
+          detected_person?: string | null
+          id?: string
+          image_url?: string | null
+          severity: string
+          source_device: string
+        }
+        Update: {
+          acknowledged?: boolean | null
+          acknowledged_at?: string | null
+          alert_type?: string
+          confidence_score?: number | null
+          created_at?: string
+          details?: string | null
+          detected_person?: string | null
+          id?: string
+          image_url?: string | null
+          severity?: string
+          source_device?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -10,6 +10,7 @@ import SecurityDashboard from "@/components/SecurityDashboard";
 import FaceRecognition from "@/components/FaceRecognition";
 import AlertMonitor from "@/components/AlertMonitor";
 import ESP32Manager from "@/components/ESP32Manager";
+import AlertReceiver from "@/components/AlertReceiver";
 
 const Index = () => {
   const [systemStatus, setSystemStatus] = useState("active");
@@ -59,7 +60,7 @@ const Index = () => {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-6">
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 bg-slate-800 border-slate-700">
+          <TabsList className="grid w-full grid-cols-5 bg-slate-800 border-slate-700">
             <TabsTrigger value="dashboard" className="flex items-center space-x-2">
               <Shield className="h-4 w-4" />
               <span>Dashboard</span>
@@ -71,6 +72,10 @@ const Index = () => {
             <TabsTrigger value="alerts" className="flex items-center space-x-2">
               <Bell className="h-4 w-4" />
               <span>Alert Monitor</span>
+            </TabsTrigger>
+            <TabsTrigger value="alert-receiver" className="flex items-center space-x-2">
+              <Smartphone className="h-4 w-4" />
+              <span>Alert Receiver</span>
             </TabsTrigger>
             <TabsTrigger value="esp32" className="flex items-center space-x-2">
               <Cpu className="h-4 w-4" />
@@ -88,6 +93,10 @@ const Index = () => {
 
           <TabsContent value="alerts">
             <AlertMonitor />
+          </TabsContent>
+
+          <TabsContent value="alert-receiver">
+            <AlertReceiver />
           </TabsContent>
 
           <TabsContent value="esp32">
