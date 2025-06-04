@@ -52,6 +52,14 @@ const Index = () => {
                 <div className="text-sm text-slate-400">Alerts Today</div>
                 <div className="text-xl font-bold text-red-400">{alertCount}</div>
               </div>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => window.open('/alert-receiver', '_blank')}
+              >
+                <Smartphone className="h-4 w-4 mr-2" />
+                Open App 2
+              </Button>
             </div>
           </div>
         </div>

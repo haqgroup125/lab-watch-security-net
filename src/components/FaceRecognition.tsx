@@ -25,7 +25,8 @@ const FaceRecognition = () => {
     loading, 
     addAuthorizedUser, 
     createAlert,
-    sendAlertToESP32
+    sendAlertToESP32,
+    sendAlertToReceivers
   } = useSecuritySystem();
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -50,29 +51,61 @@ const FaceRecognition = () => {
   };
 
   const simulateUnauthorizedDetection = async () => {
-    await createAlert({
-      alert_type: "Unauthorized Face",
-      severity: "high",
-      details: "Unknown face detected in main entrance",
+    const alertData = {
+      alert_type: "Unauthorized Face Detected",
+      severity: "high" as const,
+      details: "Unknown face detected at main entrance - immediate attention required",
       detected_person: "Unknown",
-      source_device: "Mobile App 1",
+      source_device: "Mobile App 1 - Face Recognition",
       confidence_score: 0
-    });
+    };
 
-    // Send alert to ESP32 (using example IP)
+    await createAlert(alertData);
+
+    // Send alert to ESP32 devices
     await sendAlertToESP32("192.168.1.100", {
       type: "unauthorized_face",
       message: "Unknown face detected",
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      severity: "high"
+    });
+
+    // Send alert to all receiver devices
+    await sendAlertToReceivers({
+      type: "Unauthorized Face Detected",
+      severity: "high",
+      message: "Unknown face detected at main entrance",
+      timestamp: new Date().toISOString(),
+      confidence: 0
     });
   };
 
+  const simulateAuthorizedDetection = async () => {
+    if (authorizedUsers.length === 0) {
+      alert("Please add authorized users first");
+      return;
+    }
+
+    const randomUser = authorizedUsers[Math.floor(Math.random() * authorizedUsers.length)];
+    const alertData = {
+      alert_type: "Authorized Access",
+      severity: "low" as const,
+      details: `Access granted to ${randomUser.name}`,
+      detected_person: randomUser.name,
+      source_device: "Mobile App 1 - Face Recognition",
+      confidence_score: Math.floor(Math.random() * 20) + 80 // 80-100%
+    };
+
+    await createAlert(alertData);
+  };
+
   // Get recent detections from alerts
-  const recentDetections = alerts.slice(0, 3).map(alert => ({
+  const recentDetections = alerts.slice(0, 5).map(alert => ({
     time: new Date(alert.created_at).toLocaleTimeString(),
     person: alert.detected_person || "Unknown",
     confidence: alert.confidence_score || 0,
-    status: alert.detected_person && alert.detected_person !== "Unknown" ? "authorized" : "blocked"
+    status: alert.detected_person && alert.detected_person !== "Unknown" ? "authorized" : "blocked",
+    type: alert.alert_type
   }));
 
   return (
@@ -95,8 +128,8 @@ const FaceRecognition = () => {
             <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 to-purple-900/20"></div>
             <div className="text-center z-10">
               <Camera className="h-16 w-16 text-slate-400 mx-auto mb-2" />
-              <p className="text-slate-400">Camera feed would appear here</p>
-              <p className="text-xs text-slate-500 mt-1">ML Kit face detection active</p>
+              <p className="text-slate-400">Camera feed integration required</p>
+              <p className="text-xs text-slate-500 mt-1">Connect camera for ML Kit face detection</p>
             </div>
             {recognitionActive && (
               <div className="absolute top-4 left-4">
@@ -108,40 +141,44 @@ const FaceRecognition = () => {
             )}
           </div>
           
-          <div className="flex space-x-2">
+          <div className="grid grid-cols-2 gap-2">
             <Button 
               onClick={() => setRecognitionActive(!recognitionActive)}
               variant={recognitionActive ? "destructive" : "default"}
-              className="flex-1"
             >
               {recognitionActive ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-              {recognitionActive ? "Pause Recognition" : "Start Recognition"}
+              {recognitionActive ? "Pause" : "Start"}
             </Button>
             <Button variant="outline" onClick={() => setIsRecording(!isRecording)}>
-              {isRecording ? "Stop Recording" : "Start Recording"}
+              {isRecording ? "Stop Rec" : "Start Rec"}
             </Button>
           </div>
 
-          <div className="flex space-x-2">
+          <div className="grid grid-cols-2 gap-2">
             <Button 
               onClick={simulateUnauthorizedDetection}
               variant="destructive"
-              className="flex-1"
+              className="text-xs"
             >
-              Simulate Unauthorized Detection
+              🚨 Test Unauthorized
+            </Button>
+            <Button 
+              onClick={simulateAuthorizedDetection}
+              variant="default"
+              className="text-xs"
+            >
+              ✅ Test Authorized
             </Button>
           </div>
 
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <div className="text-slate-400">Recognition Accuracy</div>
-              <div className="text-xl font-bold text-green-400">94%</div>
-              <Progress value={94} className="mt-1" />
+              <div className="text-slate-400">Authorized Users</div>
+              <div className="text-xl font-bold text-green-400">{authorizedUsers.length}</div>
             </div>
             <div>
-              <div className="text-slate-400">Processing Speed</div>
-              <div className="text-xl font-bold text-blue-400">15 FPS</div>
-              <Progress value={75} className="mt-1" />
+              <div className="text-slate-400">Total Alerts</div>
+              <div className="text-xl font-bold text-red-400">{alerts.length}</div>
             </div>
           </div>
         </CardContent>
@@ -168,18 +205,18 @@ const FaceRecognition = () => {
                 </DialogHeader>
                 <div className="space-y-4">
                   <div>
-                    <Label htmlFor="name" className="text-white">Name</Label>
+                    <Label htmlFor="name" className="text-white">Full Name *</Label>
                     <Input
                       id="name"
                       value={newUserName}
                       onChange={(e) => setNewUserName(e.target.value)}
-                      placeholder="Enter user name"
+                      placeholder="Enter user's full name"
                       className="bg-slate-700 border-slate-600 text-white"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="photo" className="text-white">Photo</Label>
-                    <div className="flex items-center space-x-2">
+                    <Label htmlFor="photo" className="text-white">Photo *</Label>
+                    <div className="space-y-2">
                       <Input
                         ref={fileInputRef}
                         id="photo"
@@ -188,20 +225,22 @@ const FaceRecognition = () => {
                         onChange={handleFileSelect}
                         className="bg-slate-700 border-slate-600 text-white"
                       />
-                      <Upload className="h-4 w-4 text-slate-400" />
+                      {selectedFile && (
+                        <div className="flex items-center space-x-2 text-sm">
+                          <Upload className="h-4 w-4 text-green-400" />
+                          <span className="text-green-400">
+                            Selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    {selectedFile && (
-                      <p className="text-sm text-green-400 mt-1">
-                        Selected: {selectedFile.name}
-                      </p>
-                    )}
                   </div>
                   <Button 
                     onClick={handleAddUser} 
                     disabled={!newUserName.trim() || !selectedFile || loading}
                     className="w-full"
                   >
-                    {loading ? "Adding..." : "Add User"}
+                    {loading ? "Adding User..." : "Add Authorized User"}
                   </Button>
                 </div>
               </DialogContent>
@@ -216,11 +255,11 @@ const FaceRecognition = () => {
                   <img 
                     src={user.image_url} 
                     alt={user.name}
-                    className="w-10 h-10 rounded-full object-cover"
+                    className="w-12 h-12 rounded-full object-cover border-2 border-green-500"
                   />
                 ) : (
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center">
-                    <span className="text-white font-medium">{user.name.charAt(0)}</span>
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center">
+                    <span className="text-white font-medium text-lg">{user.name.charAt(0)}</span>
                   </div>
                 )}
                 <div>
@@ -230,18 +269,16 @@ const FaceRecognition = () => {
                   </div>
                 </div>
               </div>
-              <div className="text-right space-y-1">
-                <Badge variant={user.is_active ? "default" : "secondary"}>
-                  {user.is_active ? "Active" : "Inactive"}
-                </Badge>
-              </div>
+              <Badge variant={user.is_active ? "default" : "secondary"}>
+                {user.is_active ? "Active" : "Inactive"}
+              </Badge>
             </div>
           ))}
           {authorizedUsers.length === 0 && (
             <div className="text-center py-8">
               <Users className="h-12 w-12 text-slate-600 mx-auto mb-2" />
               <p className="text-slate-400">No authorized users yet</p>
-              <p className="text-sm text-slate-500">Add users to enable face recognition</p>
+              <p className="text-sm text-slate-500">Click "Add User" to upload photos</p>
             </div>
           )}
         </CardContent>
@@ -260,10 +297,15 @@ const FaceRecognition = () => {
             {recentDetections.map((detection, index) => (
               <div key={index} className="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
                 <div className="flex items-center space-x-4">
-                  <div className="text-sm text-slate-400">{detection.time}</div>
-                  <div className="font-medium text-white">{detection.person}</div>
+                  <div className="text-sm text-slate-400 font-mono">{detection.time}</div>
+                  <div>
+                    <div className="font-medium text-white">{detection.person}</div>
+                    <div className="text-sm text-slate-500">{detection.type}</div>
+                  </div>
                   {detection.confidence > 0 && (
-                    <div className="text-sm text-slate-400">Confidence: {detection.confidence}%</div>
+                    <div className="text-sm text-slate-400">
+                      Confidence: {detection.confidence}%
+                    </div>
                   )}
                 </div>
                 <Badge 
@@ -277,7 +319,7 @@ const FaceRecognition = () => {
               <div className="text-center py-8">
                 <Eye className="h-12 w-12 text-slate-600 mx-auto mb-2" />
                 <p className="text-slate-400">No recent detections</p>
-                <p className="text-sm text-slate-500">Face detection results will appear here</p>
+                <p className="text-sm text-slate-500">Test buttons above to generate detection events</p>
               </div>
             )}
           </div>

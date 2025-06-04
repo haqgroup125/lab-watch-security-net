@@ -75,7 +75,12 @@ export const useSecuritySystem = () => {
         .limit(20);
       
       if (error) throw error;
-      setAlerts(data || []);
+      // Type assertion to ensure proper typing
+      const typedAlerts = (data || []).map(alert => ({
+        ...alert,
+        severity: alert.severity as 'low' | 'medium' | 'high'
+      }));
+      setAlerts(typedAlerts);
     } catch (error) {
       console.error('Error fetching alerts:', error);
       toast({
@@ -95,7 +100,13 @@ export const useSecuritySystem = () => {
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      setESP32Devices(data || []);
+      // Type assertion to ensure proper typing
+      const typedDevices = (data || []).map(device => ({
+        ...device,
+        ip_address: device.ip_address as string,
+        status: device.status as 'online' | 'offline' | 'error'
+      }));
+      setESP32Devices(typedDevices);
     } catch (error) {
       console.error('Error fetching ESP32 devices:', error);
       toast({
@@ -158,7 +169,14 @@ export const useSecuritySystem = () => {
   };
 
   // Create alert
-  const createAlert = async (alertData: Partial<SecurityAlert>) => {
+  const createAlert = async (alertData: {
+    alert_type: string;
+    severity: 'low' | 'medium' | 'high';
+    details?: string;
+    detected_person?: string;
+    source_device: string;
+    confidence_score?: number;
+  }) => {
     try {
       const { data, error } = await supabase
         .from('security_alerts')
@@ -213,6 +231,43 @@ export const useSecuritySystem = () => {
     }
   };
 
+  // Send alert to receiver devices
+  const sendAlertToReceivers = async (alertData: any) => {
+    try {
+      const { data: receivers, error } = await supabase
+        .from('alert_receivers')
+        .select('*')
+        .eq('status', 'online');
+
+      if (error) throw error;
+
+      const promises = receivers.map(async (receiver) => {
+        try {
+          const response = await fetch(`http://${receiver.ip_address}:${receiver.port}/alert`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(alertData),
+          });
+          return { receiver: receiver.device_name, success: response.ok };
+        } catch (error) {
+          return { receiver: receiver.device_name, success: false };
+        }
+      });
+
+      const results = await Promise.all(promises);
+      const successCount = results.filter(r => r.success).length;
+      
+      toast({
+        title: "Alert Broadcasted",
+        description: `Alert sent to ${successCount}/${receivers.length} receiver devices`,
+      });
+    } catch (error) {
+      console.error('Error sending alert to receivers:', error);
+    }
+  };
+
   // Initialize data fetching
   useEffect(() => {
     fetchAuthorizedUsers();
@@ -228,6 +283,7 @@ export const useSecuritySystem = () => {
     addAuthorizedUser,
     createAlert,
     sendAlertToESP32,
+    sendAlertToReceivers,
     fetchAuthorizedUsers,
     fetchAlerts,
     fetchESP32Devices,
