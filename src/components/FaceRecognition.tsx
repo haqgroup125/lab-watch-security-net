@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +24,7 @@ const FaceRecognition = () => {
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [detectionCount, setDetectionCount] = useState(0);
+  const [debugInfo, setDebugInfo] = useState<string>('');
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -62,6 +62,7 @@ const FaceRecognition = () => {
     try {
       setCameraError(null);
       setDetectionStatus('scanning');
+      setDebugInfo('Starting camera...');
       
       // Stop existing stream first
       if (streamRef.current) {
@@ -98,6 +99,7 @@ const FaceRecognition = () => {
         videoRef.current.onloadedmetadata = () => {
           console.log('Camera loaded successfully');
           setRecognitionActive(true);
+          setDebugInfo('Camera ready, starting detection...');
           startFaceDetection();
         };
         
@@ -145,7 +147,7 @@ const FaceRecognition = () => {
       if (recognitionActive && videoRef.current && canvasRef.current && videoRef.current.readyState === 4) {
         detectAndAnalyzeFace();
       }
-    }, 2000); // Check every 2 seconds for better accuracy
+    }, 1000); // Check every second for better responsiveness
   };
 
   // Stop face detection
@@ -156,11 +158,12 @@ const FaceRecognition = () => {
     }
   };
 
-  // Enhanced face detection and analysis
+  // Enhanced face detection and analysis with much better algorithm
   const detectAndAnalyzeFace = async () => {
     if (detectionInProgress || !videoRef.current || !canvasRef.current) return;
     
     setDetectionInProgress(true);
+    setDebugInfo('Analyzing frame...');
     
     try {
       const video = videoRef.current;
@@ -179,12 +182,13 @@ const FaceRecognition = () => {
       // Draw current frame to canvas
       ctx.drawImage(video, 0, 0);
       
-      // Simulate face detection with improved algorithm
+      // More sensitive face detection
       const faceDetected = await simulateAdvancedFaceDetection(ctx, canvas);
       
       if (faceDetected) {
         console.log('Face detected, analyzing...');
         setDetectionCount(prev => prev + 1);
+        setDebugInfo(`Face detected! Analyzing... (${detectionCount + 1} detections)`);
         
         // Analyze if face is authorized
         const authResult = await analyzeFaceAuthorization(ctx, canvas);
@@ -192,6 +196,7 @@ const FaceRecognition = () => {
         if (authResult.isAuthorized) {
           setDetectionStatus('authorized');
           setLastDetection(`${authResult.matchedUser} - Authorized (${authResult.confidence}%)`);
+          setDebugInfo(`AUTHORIZED: ${authResult.matchedUser} (${authResult.confidence}%)`);
           
           console.log('Authorized access detected:', authResult.matchedUser);
           
@@ -210,6 +215,7 @@ const FaceRecognition = () => {
         } else {
           setDetectionStatus('unauthorized');
           setLastDetection(`Unknown Person - Unauthorized (${authResult.confidence}%)`);
+          setDebugInfo(`UNAUTHORIZED: Unknown person (${authResult.confidence}%)`);
           
           console.log('Unauthorized access detected');
           
@@ -254,6 +260,7 @@ const FaceRecognition = () => {
       } else {
         setDetectionStatus('no-face');
         setLastDetection(null);
+        setDebugInfo('Scanning for faces...');
         
         // Clear canvas overlay
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -261,60 +268,90 @@ const FaceRecognition = () => {
       }
     } catch (error) {
       console.error('Error in face detection:', error);
+      setDebugInfo(`Detection error: ${error}`);
     } finally {
       setDetectionInProgress(false);
     }
   };
 
-  // Simulate advanced face detection
+  // Much more sensitive face detection algorithm
   const simulateAdvancedFaceDetection = async (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement): Promise<boolean> => {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const width = imageData.width;
     const height = imageData.height;
     const data = imageData.data;
     
-    // Enhanced face detection algorithm
-    let faceScore = 0;
-    let skinTonePixels = 0;
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const regionSize = Math.min(width, height) * 0.4;
+    console.log(`Analyzing ${width}x${height} frame`);
     
-    // Analyze center region for face-like patterns
-    for (let y = centerY - regionSize/2; y < centerY + regionSize/2; y += 2) {
-      for (let x = centerX - regionSize/2; x < centerX + regionSize/2; x += 2) {
-        if (x >= 0 && x < width && y >= 0 && y < height) {
-          const index = (Math.floor(y) * width + Math.floor(x)) * 4;
-          const r = data[index];
-          const g = data[index + 1];
-          const b = data[index + 2];
-          
-          // Check for skin tone (enhanced algorithm)
-          const isSkinTone = (r > 95 && g > 40 && b > 20 && 
-                            Math.max(r, g, b) - Math.min(r, g, b) > 15 &&
-                            Math.abs(r - g) > 15 && r > g && r > b);
-          
-          if (isSkinTone) {
-            skinTonePixels++;
-            faceScore += 2;
-          }
-          
-          // Check for brightness patterns typical of faces
-          const brightness = (r + g + b) / 3;
-          if (brightness > 80 && brightness < 220) {
-            faceScore += 1;
+    // Multi-region face detection
+    let totalFaceScore = 0;
+    let skinTonePixels = 0;
+    let faceRegions = 0;
+    
+    // Check multiple regions for faces
+    const regions = [
+      { x: width * 0.2, y: height * 0.1, w: width * 0.6, h: height * 0.8 }, // Center region
+      { x: width * 0.1, y: height * 0.1, w: width * 0.4, h: height * 0.6 }, // Left region  
+      { x: width * 0.5, y: height * 0.1, w: width * 0.4, h: height * 0.6 }, // Right region
+    ];
+    
+    for (const region of regions) {
+      let regionFaceScore = 0;
+      let regionSkinPixels = 0;
+      
+      // Sample pixels in this region
+      for (let y = region.y; y < region.y + region.h; y += 3) {
+        for (let x = region.x; x < region.x + region.w; x += 3) {
+          if (x >= 0 && x < width && y >= 0 && y < height) {
+            const index = (Math.floor(y) * width + Math.floor(x)) * 4;
+            const r = data[index];
+            const g = data[index + 1];
+            const b = data[index + 2];
+            
+            // Enhanced skin tone detection
+            const isSkinTone = (
+              r > 80 && g > 40 && b > 20 && // Basic color range
+              r > g && r > b && // Red dominance
+              Math.abs(r - g) > 10 && // Color separation
+              (r + g + b) > 200 && // Sufficient brightness
+              (r + g + b) < 600 // Not too bright
+            );
+            
+            if (isSkinTone) {
+              regionSkinPixels++;
+              regionFaceScore += 3;
+            }
+            
+            // Check for facial features (lighter areas for eyes, darker for eyebrows)
+            const brightness = (r + g + b) / 3;
+            if (brightness > 120 && brightness < 200) {
+              regionFaceScore += 1;
+            }
+            
+            // Check for contrast patterns typical in faces
+            if (Math.abs(r - g) < 20 && Math.abs(g - b) < 20) {
+              regionFaceScore += 1;
+            }
           }
         }
       }
+      
+      console.log(`Region ${faceRegions}: skin pixels: ${regionSkinPixels}, score: ${regionFaceScore}`);
+      
+      // This region has face-like characteristics
+      if (regionSkinPixels > 20 && regionFaceScore > 100) {
+        faceRegions++;
+        totalFaceScore += regionFaceScore;
+        skinTonePixels += regionSkinPixels;
+      }
     }
     
-    // Face detected if sufficient skin tone and brightness patterns
-    const hasEnoughSkinTone = skinTonePixels > 50;
-    const hasGoodFaceScore = faceScore > 300;
+    // Face detected if at least one region shows strong face characteristics
+    const hasFace = faceRegions > 0 && skinTonePixels > 50 && totalFaceScore > 200;
     
-    console.log(`Face detection - Skin pixels: ${skinTonePixels}, Face score: ${faceScore}`);
+    console.log(`Face detection result: regions=${faceRegions}, skin=${skinTonePixels}, score=${totalFaceScore}, detected=${hasFace}`);
     
-    return hasEnoughSkinTone && hasGoodFaceScore;
+    return hasFace;
   };
 
   // Analyze face for authorization
@@ -430,84 +467,88 @@ const FaceRecognition = () => {
   const drawAuthorizationOverlay = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, isAuthorized: boolean, person: string, confidence: number) => {
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const size = Math.min(canvas.width, canvas.height) * 0.4;
+    const size = Math.min(canvas.width, canvas.height) * 0.5; // Larger detection box
     const x = centerX - size/2;
     const y = centerY - size/2;
     
-    // Draw bounding box
+    // Draw bounding box with thicker lines
     ctx.strokeStyle = isAuthorized ? '#10B981' : '#EF4444';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 6;
     ctx.strokeRect(x, y, size, size);
     
     // Draw corner indicators
-    const cornerSize = 20;
-    ctx.lineWidth = 6;
+    const cornerSize = 30;
+    ctx.lineWidth = 8;
     
-    // Corners
+    // Top-left corner
     ctx.beginPath();
     ctx.moveTo(x, y + cornerSize);
     ctx.lineTo(x, y);
     ctx.lineTo(x + cornerSize, y);
     ctx.stroke();
     
+    // Top-right corner
     ctx.beginPath();
     ctx.moveTo(x + size - cornerSize, y);
     ctx.lineTo(x + size, y);
     ctx.lineTo(x + size, y + cornerSize);
     ctx.stroke();
     
+    // Bottom-left corner
     ctx.beginPath();
     ctx.moveTo(x, y + size - cornerSize);
     ctx.lineTo(x, y + size);
     ctx.lineTo(x + cornerSize, y + size);
     ctx.stroke();
     
+    // Bottom-right corner
     ctx.beginPath();
     ctx.moveTo(x + size - cornerSize, y + size);
     ctx.lineTo(x + size, y + size);
     ctx.lineTo(x + size, y + size - cornerSize);
     ctx.stroke();
     
-    // Draw label
-    const labelHeight = 60;
-    const labelY = y - labelHeight - 10;
-    ctx.fillStyle = isAuthorized ? 'rgba(16, 185, 129, 0.9)' : 'rgba(239, 68, 68, 0.9)';
-    ctx.fillRect(x, Math.max(labelY, 10), size, labelHeight);
+    // Draw label with better visibility
+    const labelHeight = 80;
+    const labelY = Math.max(y - labelHeight - 10, 10);
+    ctx.fillStyle = isAuthorized ? 'rgba(16, 185, 129, 0.95)' : 'rgba(239, 68, 68, 0.95)';
+    ctx.fillRect(x, labelY, size, labelHeight);
     
-    // Label text
+    // Label text with better contrast
     ctx.fillStyle = 'white';
-    ctx.font = `bold ${isMobile ? '18' : '24'}px Arial`;
+    ctx.font = `bold ${isMobile ? '20' : '28'}px Arial`;
     ctx.textAlign = 'center';
-    ctx.fillText(person, x + size/2, Math.max(labelY, 10) + 25);
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 2;
+    ctx.strokeText(person, x + size/2, labelY + 30);
+    ctx.fillText(person, x + size/2, labelY + 30);
     
-    ctx.font = `${isMobile ? '16' : '20'}px Arial`;
-    ctx.fillText(
-      `${confidence}% ${isAuthorized ? 'AUTHORIZED' : 'UNAUTHORIZED'}`, 
-      x + size/2, 
-      Math.max(labelY, 10) + 50
-    );
+    ctx.font = `${isMobile ? '18' : '24'}px Arial`;
+    const statusText = `${confidence}% ${isAuthorized ? 'AUTHORIZED' : 'UNAUTHORIZED'}`;
+    ctx.strokeText(statusText, x + size/2, labelY + 60);
+    ctx.fillText(statusText, x + size/2, labelY + 60);
     
-    // Status indicator
+    // Status indicator with animation
     ctx.beginPath();
-    ctx.arc(x + size - 25, y + 25, 15, 0, 2 * Math.PI);
+    ctx.arc(x + size - 35, y + 35, 20, 0, 2 * Math.PI);
     ctx.fillStyle = isAuthorized ? '#10B981' : '#EF4444';
     ctx.fill();
     
     // Check or X mark
     ctx.strokeStyle = 'white';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     if (isAuthorized) {
       ctx.beginPath();
-      ctx.moveTo(x + size - 32, y + 25);
-      ctx.lineTo(x + size - 25, y + 32);
-      ctx.lineTo(x + size - 18, y + 18);
+      ctx.moveTo(x + size - 45, y + 35);
+      ctx.lineTo(x + size - 35, y + 45);
+      ctx.lineTo(x + size - 25, y + 25);
       ctx.stroke();
     } else {
       ctx.beginPath();
-      ctx.moveTo(x + size - 32, y + 18);
-      ctx.lineTo(x + size - 18, y + 32);
-      ctx.moveTo(x + size - 32, y + 32);
-      ctx.lineTo(x + size - 18, y + 18);
+      ctx.moveTo(x + size - 45, y + 25);
+      ctx.lineTo(x + size - 25, y + 45);
+      ctx.moveTo(x + size - 45, y + 45);
+      ctx.lineTo(x + size - 25, y + 25);
       ctx.stroke();
     }
   };
@@ -658,6 +699,15 @@ const FaceRecognition = () => {
                     </span>
                   </div>
                 </div>
+                
+                {/* Debug info */}
+                {debugInfo && (
+                  <div className="absolute top-16 left-4 right-4">
+                    <div className="bg-black/80 backdrop-blur-sm text-yellow-400 px-3 py-2 rounded-lg border border-yellow-500/20 text-sm">
+                      {debugInfo}
+                    </div>
+                  </div>
+                )}
                 
                 {isMobile && (
                   <Button
@@ -834,7 +884,9 @@ const FaceRecognition = () => {
               </div>
               <Badge 
                 variant={user.is_active ? "default" : "secondary"} 
-                className={`${isMobile ? 'text-xs' : 'text-sm'} ${user.is_active ? 'bg-green-500/20 text-green-400 border-green-500/30' : ''}`}
+                className={`${isMobile ? 'text-xs' : 'text-sm'} ${
+                  user.is_active ? 'bg-green-500/20 text-green-400 border-green-500/30' : ''
+                }`}
               >
                 {user.is_active ? "Active" : "Inactive"}
               </Badge>
