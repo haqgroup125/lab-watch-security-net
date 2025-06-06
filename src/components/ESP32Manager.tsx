@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Cpu, Wifi, Monitor, Volume2, Eye, Zap, Settings, TestTube, Activity, Thermometer, HardDrive, Signal } from "lucide-react";
+import { Cpu, Wifi, Monitor, Volume2, Eye, Zap, Settings, TestTube, Activity, Thermometer, HardDrive, Signal, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const ESP32Manager = () => {

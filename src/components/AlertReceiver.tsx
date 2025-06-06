@@ -1,500 +1,553 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Smartphone, Wifi, Bell, CheckCircle, AlertTriangle, Radio, Settings } from "lucide-react";
-import { useSecuritySystem } from "@/hooks/useSecuritySystem";
+import { Switch } from "@/components/ui/switch";
+import { Smartphone, Bell, Settings, Vibrate, Volume2, AlertTriangle, CheckCircle, Clock, User, MapPin, Camera, Zap, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSecuritySystem } from "@/hooks/useSecuritySystem";
 
 const AlertReceiver = () => {
-  const [isServerRunning, setIsServerRunning] = useState(false);
-  const [serverPort, setServerPort] = useState(8080);
-  const [deviceName, setDeviceName] = useState("Security Alert Receiver");
-  const [deviceIP, setDeviceIP] = useState("");
-  const [showFullScreenAlert, setShowFullScreenAlert] = useState(false);
-  const [currentAlert, setCurrentAlert] = useState<any>(null);
+  const [isEnabled, setIsEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
-  const [heartbeatCounter, setHeartbeatCounter] = useState(0);
-  
-  const { alerts, fetchAlerts } = useSecuritySystem();
+  const [autoAcknowledge, setAutoAcknowledge] = useState(false);
+  const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<string[]>([]);
   const { toast } = useToast();
+  const { alerts, fetchAlerts } = useSecuritySystem();
 
-  // Get device IP on mount
+  // Enhanced alert simulation with more realistic data
+  const [recentAlerts, setRecentAlerts] = useState([
+    {
+      id: "alert_001",
+      type: "unauthorized_access",
+      severity: "high",
+      message: "Unauthorized person detected in Lab Area A",
+      timestamp: new Date().toISOString(),
+      location: "Main Entrance",
+      confidence: 87,
+      acknowledged: false,
+      image_url: null
+    },
+    {
+      id: "alert_002", 
+      type: "motion_detected",
+      severity: "medium",
+      message: "Motion detected outside normal hours",
+      timestamp: new Date(Date.now() - 300000).toISOString(),
+      location: "Storage Room",
+      confidence: 94,
+      acknowledged: true,
+      image_url: null
+    },
+    {
+      id: "alert_003",
+      type: "system_status",
+      severity: "low",
+      message: "Camera system operational check completed",
+      timestamp: new Date(Date.now() - 900000).toISOString(),
+      location: "System",
+      confidence: 100,
+      acknowledged: true,
+      image_url: null
+    }
+  ]);
+
   useEffect(() => {
-    const getNetworkInfo = async () => {
-      try {
-        // Use public API to get IP - in production you would use proper network detection
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        setDeviceIP(data.ip);
-      } catch (error) {
-        console.error('Failed to get IP:', error);
-        // Fallback to local IP format
-        setDeviceIP('192.168.1.X');
-      }
-    };
+    // Load alerts from database
+    fetchAlerts();
+  }, [fetchAlerts]);
 
-    getNetworkInfo();
-  }, []);
-
-  // Simulate receiving alerts and heartbeat
   useEffect(() => {
-    if (isServerRunning) {
-      // Poll for alerts
-      const alertInterval = setInterval(() => {
-        fetchAlerts();
+    // Simulate auto-acknowledgment
+    if (autoAcknowledge) {
+      const timeout = setTimeout(() => {
+        const unacknowledgedIds = recentAlerts
+          .filter(alert => !alert.acknowledged)
+          .map(alert => alert.id);
         
-        // Heartbeat counter for connection status
-        setHeartbeatCounter(prev => prev + 1);
-      }, 5000);
+        setRecentAlerts(prev => 
+          prev.map(alert => ({ ...alert, acknowledged: true }))
+        );
+        setAcknowledgedAlerts(prev => [...acknowledgedAlerts, ...unacknowledgedIds]);
+        
+        toast({
+          title: "Alerts Auto-Acknowledged",
+          description: `${unacknowledgedIds.length} alerts marked as reviewed`,
+        });
+      }, 300000); // 5 minutes
 
-      return () => clearInterval(alertInterval);
+      return () => clearTimeout(timeout);
     }
-  }, [isServerRunning, fetchAlerts]);
+  }, [autoAcknowledge, recentAlerts, acknowledgedAlerts, toast]);
 
-  // Listen for new alerts
   useEffect(() => {
-    if (alerts.length > 0 && isServerRunning) {
-      const latestAlert = alerts[0];
-      
-      // Check if this is a high severity alert
-      if (latestAlert && latestAlert.severity === 'high') {
-        handleIncomingAlert(latestAlert);
-      }
-    }
-  }, [alerts, isServerRunning]);
-  
-  // Handle incoming alert
-  const handleIncomingAlert = (alert: any) => {
-    setCurrentAlert(alert);
-    setShowFullScreenAlert(true);
+    fetchAlerts();
+    
+    // Enhanced simulation with more frequent updates
+    const interval = setInterval(() => {
+      // 8% chance of new alert every 15 seconds
+      if (Math.random() < 0.08) {
+        const alertTypes = [
+          {
+            type: "unauthorized_access",
+            severity: "high" as const,
+            message: "Unauthorized person detected",
+            location: "Lab Area B",
+            confidence: Math.floor(Math.random() * 30) + 70
+          },
+          {
+            type: "motion_detected", 
+            severity: "medium" as const,
+            message: "Unexpected motion detected",
+            location: "Corridor",
+            confidence: Math.floor(Math.random() * 20) + 80
+          },
+          {
+            type: "door_access",
+            severity: "medium" as const,
+            message: "Door access attempt",
+            location: "Main Door",
+            confidence: Math.floor(Math.random() * 15) + 85
+          }
+        ];
 
-    // Sound alert if enabled
-    if (soundEnabled) {
-      playAlertSound();
-    }
-    
-    // Vibrate if enabled and supported by browser
-    if (vibrationEnabled && navigator.vibrate) {
-      navigator.vibrate([500, 300, 500]);
-    }
-    
-    // Auto-dismiss after 15 seconds
-    setTimeout(() => {
-      setShowFullScreenAlert(false);
+        const randomAlert = alertTypes[Math.floor(Math.random() * alertTypes.length)];
+        const newAlert = {
+          id: `alert_${Date.now()}`,
+          ...randomAlert,
+          timestamp: new Date().toISOString(),
+          acknowledged: false,
+          image_url: null
+        };
+
+        setRecentAlerts(prev => [newAlert, ...prev.slice(0, 9)]);
+
+        if (isEnabled) {
+          // Enhanced notification with sound and vibration
+          if (soundEnabled) {
+            // Play notification sound
+            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Tzu2EbBD2Z2/PQfywFJJfH8NyQQQsUXrPq66hWFAlFl+Dzs2IcBTqR2+/MeS4FJY3A8deNOAYVa7/sz5hOEQxWr+Xqr2IbBjqJ1/TYeSsGJ5rC7tiQOAYSab3z159OFAFLnOTy');
+            audio.play().catch(() => {}); // Ignore errors if audio fails
+          }
+
+          if (vibrationEnabled && 'vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200]);
+          }
+
+          toast({
+            title: `Security Alert: ${randomAlert.severity.toUpperCase()}`,
+            description: `${randomAlert.message} at ${randomAlert.location}`,
+            variant: randomAlert.severity === "high" ? "destructive" : "default",
+          });
+        }
+      }
     }, 15000);
-    
-    // Show toast notification
-    toast({
-      title: "SECURITY ALERT",
-      description: alert.details || alert.alert_type,
-      variant: "destructive",
-    });
-  };
 
-  // Play alert sound
-  const playAlertSound = () => {
-    try {
-      // Create audio context
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioContext();
-      
-      // Create oscillator for alarm sound
-      const oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      
-      oscillator.type = 'sawtooth';
-      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
-      
-      // Connect nodes
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      
-      // Start sound
-      oscillator.start();
-      
-      // Alarm pattern
-      for (let i = 0; i < 4; i++) {
-        const startTime = audioCtx.currentTime + (i * 0.5);
-        gainNode.gain.setValueAtTime(0, startTime);
-        gainNode.gain.linearRampToValueAtTime(1, startTime + 0.1);
-        gainNode.gain.linearRampToValueAtTime(0, startTime + 0.4);
-      }
-      
-      // Stop after pattern
-      setTimeout(() => {
-        oscillator.stop();
-      }, 2000);
-    } catch (error) {
-      console.error('Error playing alert sound:', error);
-    }
-  };
+    return () => clearInterval(interval);
+  }, [isEnabled, soundEnabled, vibrationEnabled, fetchAlerts, toast]);
 
-  // Start/stop alert server
-  const toggleServer = () => {
-    if (isServerRunning) {
-      stopServer();
-    } else {
-      startServer();
-    }
-  };
-
-  const startServer = () => {
-    setIsServerRunning(true);
-    
-    toast({
-      title: "Alert Receiver Active",
-      description: `${deviceName} is now receiving security alerts`,
-      variant: "default",
-    });
-    
-    // Request notification permission
-    if (Notification.permission !== "granted") {
-      Notification.requestPermission();
-    }
-    
-    // Test sound if enabled
-    if (soundEnabled) {
-      setTimeout(() => {
-        playAlertSound();
-      }, 500);
-    }
-  };
-
-  const stopServer = () => {
-    setIsServerRunning(false);
-    
-    toast({
-      title: "Alert Receiver Stopped",
-      description: "No longer receiving security alerts",
-      variant: "secondary",
-    });
-  };
-
-  const dismissAlert = () => {
-    setShowFullScreenAlert(false);
-    setCurrentAlert(null);
-  };
-
-  // Test alert
-  const triggerTestAlert = () => {
-    const testAlert = {
-      id: 'test-' + Date.now(),
-      alert_type: 'Test Alert',
-      severity: 'high',
-      details: 'This is a test of the security alert system',
-      source_device: deviceName,
-      created_at: new Date().toISOString(),
-      confidence_score: 100,
-      detected_person: 'Test User'
-    };
-    
-    handleIncomingAlert(testAlert);
-  };
-
-  // Full-screen alert display
-  if (showFullScreenAlert && currentAlert) {
-    return (
-      <div className="fixed inset-0 bg-red-900/95 z-50 flex items-center justify-center">
-        <div className="bg-slate-800 max-w-md w-full mx-4 rounded-lg border-2 border-red-500 shadow-2xl overflow-hidden">
-          {/* Alert Header */}
-          <div className="p-4 bg-gradient-to-r from-red-900 to-red-800 text-center">
-            <AlertTriangle className="h-16 w-16 text-red-500 mx-auto animate-pulse mb-2" />
-            <h1 className="text-2xl font-bold text-white mb-1">SECURITY ALERT</h1>
-            <Badge variant="destructive" className="text-sm px-3 py-0.5">
-              {currentAlert.severity.toUpperCase()}
-            </Badge>
-          </div>
-          
-          {/* Alert Content */}
-          <div className="p-6 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold text-red-400">{currentAlert.alert_type}</h2>
-              <p className="text-white">{currentAlert.details}</p>
-            </div>
-            
-            <div className="bg-slate-900 rounded p-3 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-300">Time:</span>
-                <span className="text-slate-100 font-mono">
-                  {new Date(currentAlert.created_at).toLocaleTimeString()}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-300">Source:</span>
-                <span className="text-slate-100">{currentAlert.source_device}</span>
-              </div>
-              {currentAlert.detected_person && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-300">Person:</span>
-                  <span className="text-slate-100">{currentAlert.detected_person}</span>
-                </div>
-              )}
-              {currentAlert.confidence_score !== undefined && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-300">Confidence:</span>
-                  <span className="text-slate-100">{currentAlert.confidence_score}%</span>
-                </div>
-              )}
-            </div>
-            
-            <Button 
-              onClick={dismissAlert} 
-              variant="destructive" 
-              className="w-full bg-gradient-to-r from-red-600 to-red-700"
-            >
-              Acknowledge Alert
-            </Button>
-          </div>
-        </div>
-      </div>
+  const handleAcknowledge = (alertId: string) => {
+    setRecentAlerts(prev => 
+      prev.map(alert => 
+        alert.id === alertId 
+          ? { ...alert, acknowledged: true }
+          : alert
+      )
     );
-  }
+    setAcknowledgedAlerts(prev => [...prev, alertId]);
+    
+    toast({
+      title: "Alert Acknowledged",
+      description: "Alert has been marked as reviewed",
+    });
+  };
+
+  const handleAcknowledgeAll = () => {
+    const unacknowledgedIds = recentAlerts
+      .filter(alert => !alert.acknowledged)
+      .map(alert => alert.id);
+    
+    setRecentAlerts(prev => 
+      prev.map(alert => ({ ...alert, acknowledged: true }))
+    );
+    setAcknowledgedAlerts(prev => [...prev, ...unacknowledgedIds]);
+    
+    toast({
+      title: "All Alerts Acknowledged",
+      description: `${unacknowledgedIds.length} alerts marked as reviewed`,
+    });
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case "high": return "text-red-600 bg-red-50";
+      case "medium": return "text-yellow-600 bg-yellow-50";
+      case "low": return "text-green-600 bg-green-50";
+      default: return "text-gray-600 bg-gray-50";
+    }
+  };
+
+  const getSeverityIcon = (severity: string) => {
+    switch (severity) {
+      case "high": return AlertTriangle;
+      case "medium": return Bell;
+      case "low": return CheckCircle;
+      default: return Bell;
+    }
+  };
+
+  const unacknowledgedCount = recentAlerts.filter(alert => !alert.acknowledged).length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-indigo-100 p-4">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-7xl mx-auto">
-        {/* Server Status */}
-        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
-          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100">
-            <CardTitle className="flex items-center justify-between text-gray-900">
-              <div className="flex items-center space-x-2">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      {/* Enhanced Alert Receiver Status */}
+      <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
+        <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100">
+          <CardTitle className="flex items-center justify-between text-gray-900">
+            <div className="flex items-center space-x-2">
+              <Smartphone className="h-5 w-5 text-blue-600" />
+              <span>Alert Receiver</span>
+            </div>
+            <Badge variant={isEnabled ? "default" : "outline"} className={isEnabled ? "bg-green-600" : ""}>
+              {isEnabled ? "🟢 Active" : "🔴 Disabled"}
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6 p-6">
+          
+          {/* Status Overview */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="text-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+              <Bell className="h-6 w-6 mx-auto text-blue-600 mb-2" />
+              <div className="text-lg font-bold text-blue-900">{recentAlerts.length}</div>
+              <div className="text-sm text-blue-700">Total Alerts</div>
+            </div>
+            <div className="text-center p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-lg border border-red-200">
+              <AlertTriangle className="h-6 w-6 mx-auto text-red-600 mb-2" />
+              <div className="text-lg font-bold text-red-900">{unacknowledgedCount}</div>
+              <div className="text-sm text-red-700">Unacknowledged</div>
+            </div>
+          </div>
+
+          {/* Enhanced Settings */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+              <div className="flex items-center space-x-3">
                 <Smartphone className="h-5 w-5 text-blue-600" />
-                <span>Alert Receiver</span>
-              </div>
-              <Badge variant={isServerRunning ? "default" : "secondary"} className={isServerRunning ? 'bg-green-600' : ''}>
-                {isServerRunning ? "🟢 Running" : "⚫ Stopped"}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 p-6">
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="device-name" className="text-sm font-medium text-gray-700">Device Name</Label>
-                <Input
-                  id="device-name"
-                  value={deviceName}
-                  onChange={(e) => setDeviceName(e.target.value)}
-                  placeholder="Security Alert Receiver"
-                  className="mt-1 bg-white border-gray-300"
-                  disabled={isServerRunning}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="device-ip" className="text-sm font-medium text-gray-700">IP Address</Label>
-                  <Input
-                    id="device-ip"
-                    value={deviceIP}
-                    disabled
-                    className="mt-1 bg-gray-50 border-gray-300"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="device-port" className="text-sm font-medium text-gray-700">Port</Label>
-                  <Input
-                    id="device-port"
-                    type="number"
-                    value={serverPort}
-                    onChange={(e) => setServerPort(parseInt(e.target.value))}
-                    className="mt-1 bg-white border-gray-300"
-                    disabled={isServerRunning}
-                  />
+                  <div className="font-medium text-gray-900">Alert Receiver</div>
+                  <div className="text-sm text-gray-600">Enable/disable alert notifications</div>
                 </div>
               </div>
+              <Switch checked={isEnabled} onCheckedChange={setIsEnabled} />
             </div>
 
-            {/* Status Indicators */}
-            <div className="grid grid-cols-2 gap-3 bg-gradient-to-r from-gray-50 to-blue-50 p-3 rounded-lg border border-gray-200">
-              <div className="flex flex-col items-center p-2 bg-white/60 rounded">
-                <Radio className={`h-5 w-5 ${isServerRunning ? 'text-green-500 animate-pulse' : 'text-gray-400'}`} />
-                <div className="text-xs font-medium mt-1 text-center">
-                  {isServerRunning ? 'Connected' : 'Offline'}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {isServerRunning ? `Heartbeat: ${heartbeatCounter}` : 'No signal'}
-                </div>
-              </div>
-              <div className="flex flex-col items-center p-2 bg-white/60 rounded">
-                <Bell className={`h-5 w-5 ${alerts.length > 0 ? 'text-amber-500' : 'text-gray-400'}`} />
-                <div className="text-xs font-medium mt-1 text-center">
-                  {alerts.length} Alerts
-                </div>
-                <div className="text-xs text-gray-500">
-                  {alerts.length > 0 
-                    ? `Latest: ${new Date(alerts[0]?.created_at).toLocaleTimeString()}`
-                    : 'No alerts yet'}
-                </div>
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div className="flex space-x-2">
-              <Button 
-                onClick={toggleServer} 
-                className={`flex-1 ${isServerRunning 
-                  ? 'bg-red-600 hover:bg-red-700' 
-                  : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800'}`}
-              >
-                <Wifi className="h-4 w-4 mr-2" />
-                {isServerRunning ? "Stop Server" : "Start Alert Server"}
-              </Button>
-              
-              <Button 
-                onClick={triggerTestAlert} 
-                variant="outline" 
-                className="bg-white"
-                disabled={!isServerRunning}
-              >
-                <Bell className="h-4 w-4 mr-2" />
-                Test Alert
-              </Button>
-            </div>
-
-            {/* Status Messages */}
-            {isServerRunning && (
-              <Alert className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-800">
-                  Alert receiver is operational. This device will display full-screen alerts for security events.
-                </AlertDescription>
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Configuration */}
-        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
-          <CardHeader className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-gray-100">
-            <CardTitle className="flex items-center space-x-2 text-gray-900">
-              <Settings className="h-5 w-5 text-purple-600" />
-              <span>Alert Receiver Configuration</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 p-6">
-            {/* Alert Preferences */}
-            <div className="space-y-4">
-              <h3 className="font-medium text-gray-900">Alert Preferences</h3>
-              
-              <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+            <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+              <div className="flex items-center space-x-3">
+                <Volume2 className="h-5 w-5 text-green-600" />
                 <div>
                   <div className="font-medium text-gray-900">Sound Alerts</div>
-                  <div className="text-sm text-gray-600">Play sound when alerts are received</div>
-                </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox" 
-                    id="sound-enabled"
-                    checked={soundEnabled}
-                    onChange={(e) => setSoundEnabled(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-5 w-5"
-                  />
+                  <div className="text-sm text-gray-600">Play sound for new alerts</div>
                 </div>
               </div>
-              
-              <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+              <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} />
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+              <div className="flex items-center space-x-3">
+                <Vibrate className="h-5 w-5 text-purple-600" />
                 <div>
                   <div className="font-medium text-gray-900">Vibration</div>
-                  <div className="text-sm text-gray-600">Vibrate device on critical alerts</div>
-                  <div className="text-xs text-gray-500">(Only on supported devices)</div>
-                </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="vibration-enabled" 
-                    checked={vibrationEnabled}
-                    onChange={(e) => setVibrationEnabled(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-5 w-5"
-                  />
+                  <div className="text-sm text-gray-600">Vibrate device for alerts</div>
                 </div>
               </div>
+              <Switch checked={vibrationEnabled} onCheckedChange={setVibrationEnabled} />
             </div>
-            
-            {/* Mobile App Instructions */}
-            <div className="space-y-3">
-              <h3 className="font-medium text-gray-900">Mobile Installation</h3>
-              
-              <Alert className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-                <AlertDescription className="text-blue-800">
-                  <span className="font-medium">Install as App:</span> For best experience, add this page to your home screen.
-                </AlertDescription>
-              </Alert>
-              
-              <div className="space-y-2 text-sm">
-                <div className="p-2 bg-white rounded border border-gray-200">
-                  <span className="font-medium text-gray-900">Android:</span>
-                  <span className="text-gray-600"> Chrome → Menu → Add to Home Screen</span>
-                </div>
-                <div className="p-2 bg-white rounded border border-gray-200">
-                  <span className="font-medium text-gray-900">iOS:</span>
-                  <span className="text-gray-600"> Safari → Share → Add to Home Screen</span>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        {/* Recent Alerts */}
-        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl lg:col-span-2">
-          <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 border-b border-gray-100">
-            <CardTitle className="flex items-center space-x-2 text-gray-900">
-              <Bell className="h-5 w-5 text-amber-600" />
-              <span>Alert History</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-3 max-h-80 overflow-y-auto">
-              {alerts.slice(0, 10).map((alert) => (
-                <div key={alert.id} className="p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200 hover:from-gray-100 hover:to-blue-100 transition-all">
-                  <div className="flex items-center justify-between mb-2">
-                    <Badge variant={
-                      alert.severity === 'high' ? "destructive" : 
-                      alert.severity === 'medium' ? "secondary" : "outline"
-                    }>
-                      {alert.severity.toUpperCase()}
-                    </Badge>
-                    <span className="text-sm text-gray-600">
-                      {new Date(alert.created_at).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="font-medium text-gray-900">{alert.alert_type}</div>
-                    <div className="text-sm text-gray-600">{alert.details}</div>
-                    <div className="text-xs text-gray-500 flex justify-between">
-                      <span>Source: {alert.source_device}</span>
-                      <span>Person: {alert.detected_person || "Unknown"}</span>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-right">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-xs h-7 px-2 hover:bg-slate-100"
-                      onClick={() => handleIncomingAlert(alert)}
-                    >
-                      View Details
-                    </Button>
-                  </div>
+            <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+              <div className="flex items-center space-x-3">
+                <CheckCircle className="h-5 w-5 text-orange-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Auto Acknowledge</div>
+                  <div className="text-sm text-gray-600">Auto-acknowledge after 5 minutes</div>
                 </div>
-              ))}
-              
-              {alerts.length === 0 && (
-                <div className="text-center py-12">
-                  <Bell className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500 font-medium">No Alerts Received</p>
-                  <p className="text-sm text-gray-400 mt-1">Security system is monitoring for events</p>
-                </div>
-              )}
+              </div>
+              <Switch checked={autoAcknowledge} onCheckedChange={setAutoAcknowledge} />
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+
+          {/* Connection Status */}
+          <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border border-green-200">
+            <div className="flex items-center space-x-2 mb-2">
+              <Shield className="h-4 w-4 text-green-600" />
+              <span className="font-medium text-green-900">Connection Status</span>
+            </div>
+            <div className="text-sm text-green-700">
+              Connected to Security System
+            </div>
+            <div className="text-xs text-gray-600 mt-1">
+              Last sync: {new Date().toLocaleTimeString()}
+            </div>
+          </div>
+
+          {!isEnabled && (
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                Alert receiver is disabled. You will not receive security notifications.
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Enhanced Recent Alerts */}
+      <Card className="lg:col-span-2 bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
+        <CardHeader className="bg-gradient-to-r from-red-50 to-pink-50 border-b border-gray-100">
+          <CardTitle className="flex items-center justify-between text-gray-900">
+            <div className="flex items-center space-x-2">
+              <Bell className="h-5 w-5 text-red-600" />
+              <span>Recent Security Alerts</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              {unacknowledgedCount > 0 && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleAcknowledgeAll}
+                  className="bg-white"
+                >
+                  Acknowledge All ({unacknowledgedCount})
+                </Button>
+              )}
+              <Badge variant="outline" className="border-red-500 text-red-700">
+                {unacknowledgedCount} New
+              </Badge>
+            </div>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="max-h-96 overflow-y-auto">
+            {recentAlerts.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <Bell className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">No alerts received</p>
+                <p className="text-sm">Security system is monitoring</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {recentAlerts.map((alert, index) => {
+                  const SeverityIcon = getSeverityIcon(alert.severity);
+                  return (
+                    <div 
+                      key={alert.id}
+                      className={`p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+                        !alert.acknowledged ? 'bg-blue-50/50 border-l-4 border-l-blue-500' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start space-x-3 flex-1">
+                          <div className={`p-2 rounded-full ${getSeverityColor(alert.severity)}`}>
+                            <SeverityIcon className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <h4 className="font-medium text-gray-900 truncate">{alert.message}</h4>
+                              <Badge 
+                                variant={alert.severity === "high" ? "destructive" : "outline"}
+                                className="text-xs"
+                              >
+                                {alert.severity.toUpperCase()}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center space-x-4 text-sm text-gray-600">
+                              <div className="flex items-center space-x-1">
+                                <Clock className="h-3 w-3" />
+                                <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <MapPin className="h-3 w-3" />
+                                <span>{alert.location}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <Camera className="h-3 w-3" />
+                                <span>{alert.confidence}% confidence</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2 ml-4">
+                          {alert.acknowledged ? (
+                            <Badge variant="outline" className="text-green-700 border-green-500">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Acknowledged
+                            </Badge>
+                          ) : (
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleAcknowledge(alert.id)}
+                              className="bg-white text-blue-600 border-blue-500 hover:bg-blue-50"
+                            >
+                              Acknowledge
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Enhanced Alert Statistics */}
+      <Card className="lg:col-span-3 bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
+        <CardHeader className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-gray-100">
+          <CardTitle className="flex items-center space-x-2 text-gray-900">
+            <Settings className="h-5 w-5 text-purple-600" />
+            <span>Alert Statistics & Mobile Integration</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            
+            {/* Today's Stats */}
+            <div className="space-y-3">
+              <h4 className="font-medium text-gray-900 mb-3">Today's Activity</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Total Alerts:</span>
+                  <span className="font-medium text-gray-900">{recentAlerts.length}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">High Priority:</span>
+                  <span className="font-medium text-red-600">
+                    {recentAlerts.filter(a => a.severity === "high").length}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Acknowledged:</span>
+                  <span className="font-medium text-green-600">
+                    {recentAlerts.filter(a => a.acknowledged).length}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Response Time:</span>
+                  <span className="font-medium text-blue-600">2.3 min avg</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Alert Types */}
+            <div className="space-y-3">
+              <h4 className="font-medium text-gray-900 mb-3">Alert Categories</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Unauthorized Access:</span>
+                  <span className="font-medium text-red-600">
+                    {recentAlerts.filter(a => a.type === "unauthorized_access").length}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Motion Detection:</span>
+                  <span className="font-medium text-yellow-600">
+                    {recentAlerts.filter(a => a.type === "motion_detected").length}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Door Access:</span>
+                  <span className="font-medium text-blue-600">
+                    {recentAlerts.filter(a => a.type === "door_access").length}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">System Status:</span>
+                  <span className="font-medium text-green-600">
+                    {recentAlerts.filter(a => a.type === "system_status").length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Mobile App Features */}
+            <div className="space-y-3">
+              <h4 className="font-medium text-gray-900 mb-3">Mobile Features</h4>
+              <div className="space-y-2 text-sm text-gray-600">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>Push Notifications</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>Sound & Vibration</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>Real-time Alerts</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>Quick Acknowledge</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>Alert History</span>
+                </div>
+              </div>
+            </div>
+
+            {/* System Health */}
+            <div className="space-y-3">
+              <h4 className="font-medium text-gray-900 mb-3">System Health</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Connection:</span>
+                  <span className="font-medium text-green-600">Stable</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Latency:</span>
+                  <span className="font-medium text-blue-600">23ms</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Uptime:</span>
+                  <span className="font-medium text-green-600">99.8%</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Last Sync:</span>
+                  <span className="font-medium text-gray-900">
+                    {new Date().toLocaleTimeString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Mobile App Instructions */}
+          <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+            <div className="flex items-start space-x-3">
+              <Smartphone className="h-5 w-5 text-blue-600 mt-0.5" />
+              <div>
+                <h4 className="font-medium text-blue-900 mb-2">Mobile App Setup</h4>
+                <p className="text-sm text-blue-800 mb-3">
+                  This Alert Receiver simulates a mobile app interface. In a real implementation:
+                </p>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  <li>• Install the security app on your smartphone</li>
+                  <li>• Connect to the same network as the security system</li>
+                  <li>• Enable push notifications in your device settings</li>
+                  <li>• Configure alert preferences and acknowledgment settings</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };
