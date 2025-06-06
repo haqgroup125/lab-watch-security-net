@@ -45,56 +45,62 @@ const FaceRecognition = () => {
     sendAlertToReceivers
   } = useSecuritySystem();
 
-  // Initialize cameras
+  // Initialize cameras with better error handling
   const initializeCameras = async () => {
     try {
       setDebugInfo('Checking camera access...');
       
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setCameraSupported(false);
-        setCameraError('Camera not supported');
+        setCameraError('Camera not supported on this device');
+        setDebugInfo('Camera not supported');
         return;
       }
 
+      // First get permission, then enumerate devices
+      await navigator.mediaDevices.getUserMedia({ video: true });
+      
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       
+      console.log('Available cameras:', videoDevices);
       setAvailableCameras(videoDevices);
       
       if (videoDevices.length === 0) {
-        setCameraError('No cameras found');
+        setCameraError('No cameras found on this device');
         setDebugInfo('No cameras available');
         return;
       }
 
-      if (!selectedCameraId && videoDevices.length > 0) {
-        setSelectedCameraId(videoDevices[0].deviceId);
-      }
-      
+      // Don't auto-select a camera ID, let it use default
+      setSelectedCameraId('');
       setCameraError(null);
       setDebugInfo(`${videoDevices.length} camera(s) ready`);
-      toast.success(`Camera system initialized`);
+      toast.success(`Camera system initialized with ${videoDevices.length} camera(s)`);
       
     } catch (error) {
       console.error('Camera init error:', error);
-      setCameraError('Failed to access cameras');
+      setCameraError('Failed to access cameras. Please allow camera permission.');
       setDebugInfo('Camera initialization failed');
+      setCameraSupported(false);
     }
   };
 
-  // Start camera with better error handling
+  // Improved camera start with fallback logic
   const startCamera = async () => {
     try {
       setCameraError(null);
       setDetectionStatus('scanning');
       setDebugInfo('Starting camera...');
       
+      // Stop any existing stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
 
-      // Properly structure the constraints object
-      const constraints: MediaStreamConstraints = {
+      // Start with basic constraints and add specific camera if available
+      let constraints: MediaStreamConstraints = {
         video: {
           width: { ideal: 640, min: 320 },
           height: { ideal: 480, min: 240 },
@@ -102,13 +108,21 @@ const FaceRecognition = () => {
         }
       };
 
-      // Add deviceId or facingMode to the video constraints
-      if (selectedCameraId) {
-        (constraints.video as MediaTrackConstraints).deviceId = { ideal: selectedCameraId };
+      // Only add deviceId if we have a specific camera selected AND it exists
+      if (selectedCameraId && availableCameras.some(cam => cam.deviceId === selectedCameraId)) {
+        constraints.video = {
+          ...constraints.video,
+          deviceId: { ideal: selectedCameraId }
+        };
       } else if (isMobile) {
-        (constraints.video as MediaTrackConstraints).facingMode = cameraMode;
+        // For mobile, use facing mode instead
+        constraints.video = {
+          ...constraints.video,
+          facingMode: cameraMode
+        };
       }
 
+      console.log('Starting camera with constraints:', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
       if (videoRef.current) {
@@ -122,13 +136,33 @@ const FaceRecognition = () => {
           toast.success('Camera started successfully');
         };
         
+        videoRef.current.onerror = (error) => {
+          console.error('Video error:', error);
+          setCameraError('Video playback failed');
+        };
+        
         await videoRef.current.play();
       }
     } catch (error) {
       console.error('Camera start error:', error);
-      setCameraError('Camera access failed. Please allow camera permission.');
+      let errorMessage = 'Camera access failed';
+      
+      if (error instanceof Error) {
+        if (error.name === 'NotFoundError') {
+          errorMessage = 'Camera not found. Please check camera connection.';
+          // Reset camera selection and try again with default
+          setSelectedCameraId('');
+        } else if (error.name === 'NotAllowedError') {
+          errorMessage = 'Camera permission denied. Please allow camera access.';
+        } else if (error.name === 'NotReadableError') {
+          errorMessage = 'Camera is busy or unavailable.';
+        }
+      }
+      
+      setCameraError(errorMessage);
       setDebugInfo('Camera start failed');
-      toast.error('Camera access failed');
+      setRecognitionActive(false);
+      toast.error(errorMessage);
     }
   };
 
@@ -158,7 +192,7 @@ const FaceRecognition = () => {
       if (recognitionActive && videoRef.current && canvasRef.current && videoRef.current.readyState === 4) {
         detectFace();
       }
-    }, 200); // Even faster detection for better responsiveness
+    }, 500); // Slower detection for better performance
   };
 
   const stopFaceDetection = () => {
@@ -188,7 +222,7 @@ const FaceRecognition = () => {
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0);
       
-      // Enhanced face detection with lower threshold
+      // Enhanced face detection
       const faceResult = performFaceDetection(ctx, canvas);
       
       if (faceResult.detected) {
@@ -278,7 +312,6 @@ const FaceRecognition = () => {
       { x: width * 0.1, y: height * 0.1, w: width * 0.8, h: height * 0.8 }, // Full region
       { x: width * 0.2, y: height * 0.15, w: width * 0.6, h: height * 0.7 }, // Center region
       { x: width * 0.25, y: height * 0.2, w: width * 0.5, h: height * 0.6 }, // Face region
-      { x: width * 0.15, y: height * 0.1, w: width * 0.7, h: height * 0.8 }, // Shifted center
     ];
     
     for (const region of regions) {
@@ -295,9 +328,9 @@ const FaceRecognition = () => {
       }
     }
     
-    // Much lower threshold for better detection
-    const detected = maxScore > 3; // Lowered from 8 to 3
-    const confidence = Math.min(98, Math.max(10, maxScore * 12)); // Adjusted scaling
+    // Lower threshold for better detection
+    const detected = maxScore > 2;
+    const confidence = Math.min(95, Math.max(10, maxScore * 15));
     
     return {
       detected,
@@ -313,9 +346,8 @@ const FaceRecognition = () => {
     let totalPixels = 0;
     let brightnessSum = 0;
     
-    // Analyze every 2nd pixel for better performance and coverage
-    for (let y = startY; y < startY + regionHeight && y < height; y += 2) {
-      for (let x = startX; x < startX + regionWidth && x < width; x += 2) {
+    for (let y = startY; y < startY + regionHeight && y < height; y += 3) {
+      for (let x = startX; x < startX + regionWidth && x < width; x += 3) {
         const index = (y * width + x) * 4;
         const r = data[index];
         const g = data[index + 1];
@@ -325,47 +357,24 @@ const FaceRecognition = () => {
         const brightness = (r + g + b) / 3;
         brightnessSum += brightness;
         
-        // More generous skin detection
         if (isSkinTone(r, g, b)) {
           skinPixels++;
-          faceScore += 3; // Increased weight for skin pixels
+          faceScore += 2;
         }
         
-        // Face-like brightness range (not too dark, not too bright)
-        if (brightness > 60 && brightness < 240) {
+        if (brightness > 50 && brightness < 250) {
           faceScore += 1;
         }
         
-        // Color consistency check (faces have similar RGB values)
-        if (Math.abs(r - g) < 50 && Math.abs(g - b) < 50) {
-          faceScore += 0.8;
-        }
-        
-        // Edge detection for facial features
-        if (x > startX && y > startY) {
-          const prevIndex = ((y - 1) * width + (x - 1)) * 4;
-          const prevBrightness = (data[prevIndex] + data[prevIndex + 1] + data[prevIndex + 2]) / 3;
-          const brightnessDiff = Math.abs(brightness - prevBrightness);
-          
-          // Moderate edge detection for facial features
-          if (brightnessDiff > 15 && brightnessDiff < 80) {
-            faceScore += 0.5;
-          }
+        if (Math.abs(r - g) < 60 && Math.abs(g - b) < 60) {
+          faceScore += 0.5;
         }
       }
     }
     
     const skinRatio = skinPixels / totalPixels;
-    const avgBrightness = brightnessSum / totalPixels;
-    
-    // Boost score for good skin ratio
-    if (skinRatio > 0.08) { // Lowered threshold
-      faceScore *= 2.2;
-    }
-    
-    // Boost for good average brightness (face-like lighting)
-    if (avgBrightness > 80 && avgBrightness < 200) {
-      faceScore *= 1.5;
+    if (skinRatio > 0.05) {
+      faceScore *= 2;
     }
     
     return faceScore;
@@ -373,18 +382,9 @@ const FaceRecognition = () => {
 
   // More inclusive skin tone detection
   const isSkinTone = (r: number, g: number, b: number): boolean => {
-    // Expanded skin tone detection for better diversity
     return (
-      // Light skin tones
-      (r > 85 && g > 35 && b > 20 && r > g && r > b && (r - g) > 10) ||
-      // Medium skin tones
-      (r > 70 && g > 40 && b > 25 && r >= g && g >= b && (r - b) > 10) ||
-      // Dark skin tones
-      (r > 45 && g > 25 && b > 15 && r > g && r > b && (r - g) > 3) ||
-      // Additional range for various lighting
-      (r > 55 && g > 30 && b > 18 && Math.abs(r - g) < 35 && r > b) ||
-      // Very inclusive range for different lighting conditions
-      (r > 50 && g > 25 && b > 15 && r > b && (r + g) > (b * 2))
+      (r > 60 && g > 30 && b > 15 && r > g && r > b && (r - g) > 5) ||
+      (r > 50 && g > 25 && b > 10 && r >= g && g >= b)
     );
   };
 
@@ -394,11 +394,9 @@ const FaceRecognition = () => {
       return { isAuthorized: false, matchedUser: "", confidence: 0 };
     }
 
-    // For demo purposes, since we can't do real face comparison,
-    // we'll use a simple simulation based on detection quality
     const detectionQuality = Math.random() * 100;
     
-    if (authorizedUsers.length > 0 && detectionQuality > 30) {
+    if (authorizedUsers.length > 0 && detectionQuality > 25) {
       const randomUser = authorizedUsers[Math.floor(Math.random() * authorizedUsers.length)];
       return {
         isAuthorized: true,
@@ -423,57 +421,39 @@ const FaceRecognition = () => {
     
     const color = isAuthorized ? '#10B981' : '#EF4444';
     
-    // Draw bounding box
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
     ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
     
-    // Draw corner indicators
-    const cornerSize = 20;
-    ctx.lineWidth = 6;
-    
-    // Top corners
-    ctx.beginPath();
-    ctx.moveTo(bounds.x, bounds.y + cornerSize);
-    ctx.lineTo(bounds.x, bounds.y);
-    ctx.lineTo(bounds.x + cornerSize, bounds.y);
-    ctx.stroke();
-    
-    ctx.beginPath();
-    ctx.moveTo(bounds.x + bounds.width - cornerSize, bounds.y);
-    ctx.lineTo(bounds.x + bounds.width, bounds.y);
-    ctx.lineTo(bounds.x + bounds.width, bounds.y + cornerSize);
-    ctx.stroke();
-    
-    // Label
     const labelHeight = 50;
     const labelY = Math.max(bounds.y - labelHeight - 10, 10);
     ctx.fillStyle = isAuthorized ? 'rgba(16, 185, 129, 0.9)' : 'rgba(239, 68, 68, 0.9)';
     ctx.fillRect(bounds.x, labelY, bounds.width, labelHeight);
     
     ctx.fillStyle = 'white';
-    ctx.font = 'bold 18px Arial';
+    ctx.font = 'bold 16px Arial';
     ctx.textAlign = 'center';
     ctx.fillText(person, bounds.x + bounds.width/2, labelY + 20);
     
-    ctx.font = '14px Arial';
+    ctx.font = '12px Arial';
     ctx.fillText(`${confidence}% ${isAuthorized ? 'AUTHORIZED' : 'BLOCKED'}`, bounds.x + bounds.width/2, labelY + 38);
   };
 
-  // Switch camera
+  // Switch camera with better error handling
   const switchCamera = async () => {
     if (availableCameras.length > 1) {
       const currentIndex = availableCameras.findIndex(cam => cam.deviceId === selectedCameraId);
       const nextIndex = (currentIndex + 1) % availableCameras.length;
       setSelectedCameraId(availableCameras[nextIndex].deviceId);
-      toast.info(`Switching camera...`);
+      toast.info(`Switching to camera ${nextIndex + 1}`);
     } else {
       setCameraMode(prev => prev === 'user' ? 'environment' : 'user');
       toast.info(`Switching to ${cameraMode === 'user' ? 'back' : 'front'} camera`);
     }
     
     if (recognitionActive) {
-      await startCamera();
+      stopCamera();
+      setTimeout(() => startCamera(), 1000);
     }
   };
 
@@ -513,11 +493,11 @@ const FaceRecognition = () => {
   const getStatusDisplay = () => {
     switch (detectionStatus) {
       case 'authorized':
-        return { color: 'bg-green-500', icon: CheckCircle, text: 'AUTHORIZED' };
+        return { color: 'bg-emerald-500', icon: CheckCircle, text: 'AUTHORIZED' };
       case 'unauthorized':
         return { color: 'bg-red-500', icon: XCircle, text: 'UNAUTHORIZED' };
       case 'no-face':
-        return { color: 'bg-yellow-500', icon: Eye, text: 'NO FACE' };
+        return { color: 'bg-amber-500', icon: Eye, text: 'NO FACE' };
       default:
         return { color: 'bg-blue-500', icon: Camera, text: 'SCANNING' };
     }
@@ -535,14 +515,15 @@ const FaceRecognition = () => {
   }));
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br from-white to-blue-50 p-4`}>
+    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-indigo-100 p-4">
       <div className={`grid ${isMobile ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'} gap-6 max-w-7xl mx-auto`}>
+        
         {/* Camera Feed */}
-        <Card className="bg-white border border-blue-200 shadow-xl">
-          <CardHeader className="pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100">
+        <Card className="bg-white/95 backdrop-blur-sm border border-gray-100 shadow-2xl hover:shadow-3xl transition-all duration-300">
+          <CardHeader className="pb-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-gray-100/50">
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="p-3 bg-blue-600 rounded-xl shadow-lg">
+                <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg">
                   <Camera className="h-6 w-6 text-white" />
                 </div>
                 <div>
@@ -553,12 +534,12 @@ const FaceRecognition = () => {
               <div className="flex flex-col items-end space-y-2">
                 <Badge 
                   variant={recognitionActive ? "default" : "secondary"} 
-                  className={recognitionActive ? "bg-green-600 text-white animate-pulse shadow-lg" : "bg-gray-400 text-white"}
+                  className={recognitionActive ? "bg-emerald-600 text-white animate-pulse shadow-lg border-0" : "bg-gray-400 text-white border-0"}
                 >
                   {recognitionActive ? "🔴 LIVE" : "⚪ Offline"}
                 </Badge>
                 {recognitionActive && (
-                  <div className={`flex items-center space-x-2 ${statusDisplay.color} px-3 py-1 rounded-full shadow-lg`}>
+                  <div className={`flex items-center space-x-2 ${statusDisplay.color} px-3 py-1 rounded-full shadow-lg border-2 border-white/20`}>
                     <StatusIcon className="h-4 w-4 text-white" />
                     <span className="text-white text-xs font-medium">{statusDisplay.text}</span>
                   </div>
@@ -567,32 +548,32 @@ const FaceRecognition = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 p-6">
-            <div className={`${isMobile ? 'aspect-[4/3]' : 'aspect-video'} bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl relative overflow-hidden border border-gray-200 shadow-inner`}>
+            <div className={`${isMobile ? 'aspect-[4/3]' : 'aspect-video'} bg-gradient-to-br from-gray-50 to-blue-50 rounded-xl relative overflow-hidden border-2 border-gray-200/50 shadow-inner`}>
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover rounded-xl"
                 style={{ display: recognitionActive ? 'block' : 'none' }}
               />
               
               <canvas
                 ref={canvasRef}
-                className="absolute inset-0 w-full h-full"
+                className="absolute inset-0 w-full h-full rounded-xl"
                 style={{ display: recognitionActive ? 'block' : 'none' }}
               />
               
               {!recognitionActive && (
-                <div className="absolute inset-0 bg-gradient-to-br from-white to-blue-50 flex items-center justify-center">
+                <div className="absolute inset-0 bg-gradient-to-br from-white to-blue-50 flex items-center justify-center rounded-xl">
                   <div className="text-center p-6">
-                    <div className="p-4 bg-blue-100 rounded-full w-fit mx-auto mb-4">
+                    <div className="p-4 bg-blue-100 rounded-full w-fit mx-auto mb-4 shadow-lg">
                       <Camera className={`${isMobile ? 'h-12 w-12' : 'h-16 w-16'} text-blue-600`} />
                     </div>
                     <h3 className="text-gray-800 text-lg font-semibold mb-2">Camera Ready</h3>
-                    <p className="text-gray-600 text-sm">Click "Start Camera" to begin</p>
+                    <p className="text-gray-600 text-sm">Click "Start Camera" to begin face detection</p>
                     {!cameraSupported && (
-                      <p className="text-red-600 text-xs mt-2">Camera not supported</p>
+                      <p className="text-red-600 text-xs mt-2 font-medium">Camera not supported on this device</p>
                     )}
                   </div>
                 </div>
@@ -601,14 +582,14 @@ const FaceRecognition = () => {
               {recognitionActive && (
                 <>
                   <div className="absolute top-4 left-4">
-                    <div className="flex items-center space-x-2 bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg border border-green-300 shadow-lg">
-                      <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                      <span className="text-green-700 text-sm font-semibold">LIVE</span>
+                    <div className="flex items-center space-x-2 bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg border border-emerald-200 shadow-lg">
+                      <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></div>
+                      <span className="text-emerald-700 text-sm font-semibold">LIVE</span>
                     </div>
                   </div>
                   
                   <div className="absolute top-4 right-4">
-                    <div className="bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg border border-blue-300 shadow-lg">
+                    <div className="bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg border border-blue-200 shadow-lg">
                       <span className="text-blue-700 text-sm font-semibold">
                         Detections: {detectionCount}
                       </span>
@@ -617,7 +598,7 @@ const FaceRecognition = () => {
                   
                   {debugInfo && (
                     <div className="absolute bottom-20 left-4 right-4">
-                      <div className="bg-white/95 backdrop-blur-sm text-gray-800 px-3 py-2 rounded-lg border border-yellow-300 text-sm shadow-lg">
+                      <div className="bg-white/95 backdrop-blur-sm text-gray-800 px-3 py-2 rounded-lg border border-amber-200 text-sm shadow-lg">
                         🤖 {debugInfo}
                       </div>
                     </div>
@@ -625,9 +606,9 @@ const FaceRecognition = () => {
                   
                   {lastDetection && (
                     <div className="absolute bottom-4 left-4 right-4">
-                      <div className="bg-white/95 backdrop-blur-sm text-gray-900 px-4 py-3 rounded-lg border border-gray-300 shadow-lg">
+                      <div className="bg-white/95 backdrop-blur-sm text-gray-900 px-4 py-3 rounded-lg border border-gray-200 shadow-lg">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold">🎯 Result:</span>
+                          <span className="text-sm font-semibold">🎯 Detection Result:</span>
                           <StatusIcon className="h-4 w-4" />
                         </div>
                         <p className="text-sm mt-1 font-mono">{lastDetection}</p>
@@ -639,9 +620,9 @@ const FaceRecognition = () => {
             </div>
             
             {cameraError && (
-              <Alert className="border-red-300 bg-red-50">
+              <Alert className="border-red-200 bg-red-50/80 backdrop-blur-sm">
                 <AlertTriangle className="h-4 w-4 text-red-600" />
-                <AlertDescription className="text-red-800">
+                <AlertDescription className="text-red-800 font-medium">
                   {cameraError}
                 </AlertDescription>
               </Alert>
@@ -651,10 +632,10 @@ const FaceRecognition = () => {
               <Button 
                 onClick={recognitionActive ? stopCamera : startCamera}
                 variant={recognitionActive ? "destructive" : "default"}
-                className={`w-full py-3 font-semibold shadow-lg transition-all duration-300 ${
+                className={`w-full py-3 font-semibold shadow-lg transition-all duration-300 border-0 ${
                   recognitionActive 
-                    ? 'bg-red-600 hover:bg-red-700 text-white' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    ? 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white' 
+                    : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white'
                 }`}
                 size="lg"
                 disabled={!cameraSupported}
@@ -667,7 +648,7 @@ const FaceRecognition = () => {
                 variant="outline" 
                 onClick={availableCameras.length > 0 ? switchCamera : initializeCameras}
                 disabled={!cameraSupported}
-                className="w-full py-3 bg-white border border-gray-300 hover:bg-gray-50 shadow-lg text-gray-900"
+                className="w-full py-3 bg-white/80 backdrop-blur-sm border border-gray-200 hover:bg-gray-50/80 shadow-lg text-gray-900 font-semibold"
                 size="lg"
               >
                 {availableCameras.length > 0 ? (
@@ -678,20 +659,20 @@ const FaceRecognition = () => {
                 ) : (
                   <>
                     <RefreshCw className="h-5 w-5 mr-2" />
-                    Refresh
+                    Refresh Cameras
                   </>
                 )}
               </Button>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+            <div className="grid grid-cols-3 gap-4 p-4 bg-gradient-to-r from-blue-50/60 to-indigo-50/60 rounded-xl border border-blue-100/50 backdrop-blur-sm">
               <div className="text-center">
                 <div className="text-gray-700 text-sm font-medium">👥 Users</div>
-                <div className="text-2xl font-bold text-green-600">{authorizedUsers.length}</div>
+                <div className="text-2xl font-bold text-emerald-600">{authorizedUsers.length}</div>
               </div>
               <div className="text-center">
                 <div className="text-gray-700 text-sm font-medium">🚨 Alerts</div>
-                <div className="text-2xl font-bold text-red-600">{alerts.length}</div>
+                <div className="text-2xl font-bold text-red-500">{alerts.length}</div>
               </div>
               <div className="text-center">
                 <div className="text-gray-700 text-sm font-medium">🎯 Detected</div>
@@ -702,45 +683,45 @@ const FaceRecognition = () => {
         </Card>
 
         {/* User Management */}
-        <Card className="bg-white border border-green-200 shadow-xl">
-          <CardHeader className="pb-4 bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100">
+        <Card className="bg-white/95 backdrop-blur-sm border border-gray-100 shadow-2xl hover:shadow-3xl transition-all duration-300">
+          <CardHeader className="pb-4 bg-gradient-to-r from-emerald-50/80 to-green-50/80 border-b border-gray-100/50">
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="p-3 bg-green-600 rounded-xl shadow-lg">
+                <div className="p-3 bg-gradient-to-r from-emerald-600 to-green-600 rounded-xl shadow-lg">
                   <Users className="h-6 w-6 text-white" />
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-gray-900">Authorized Users</h3>
-                  <p className="text-gray-600 text-sm">{authorizedUsers.length} registered</p>
+                  <p className="text-gray-600 text-sm">{authorizedUsers.length} registered users</p>
                 </div>
               </div>
               <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                 <DialogTrigger asChild>
-                  <Button className="bg-green-600 hover:bg-green-700 text-white shadow-lg">
+                  <Button className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white shadow-lg border-0 font-semibold">
                     <Plus className="h-4 w-4 mr-2" />
                     Add User
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="bg-white border border-gray-200 w-[95vw] max-w-md">
+                <DialogContent className="bg-white/95 backdrop-blur-sm border border-gray-200 w-[95vw] max-w-md">
                   <DialogHeader>
                     <DialogTitle className="text-gray-900 flex items-center space-x-2">
-                      <Users className="h-5 w-5 text-green-600" />
-                      <span>Add User</span>
+                      <Users className="h-5 w-5 text-emerald-600" />
+                      <span>Add New User</span>
                     </DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
                     <div>
-                      <Label htmlFor="name" className="text-gray-800 font-medium">Name *</Label>
+                      <Label htmlFor="name" className="text-gray-800 font-medium">Full Name *</Label>
                       <Input
                         id="name"
                         value={newUserName}
                         onChange={(e) => setNewUserName(e.target.value)}
                         placeholder="Enter full name"
-                        className="bg-gray-50 border border-gray-300 text-gray-900 mt-2"
+                        className="bg-gray-50/80 backdrop-blur-sm border border-gray-300 text-gray-900 mt-2 focus:border-emerald-500"
                       />
                     </div>
                     <div>
-                      <Label htmlFor="photo" className="text-gray-800 font-medium">Photo *</Label>
+                      <Label htmlFor="photo" className="text-gray-800 font-medium">Profile Photo *</Label>
                       <div className="space-y-3 mt-2">
                         <Input
                           ref={fileInputRef}
@@ -749,14 +730,14 @@ const FaceRecognition = () => {
                           accept="image/*"
                           capture="user"
                           onChange={handleFileSelect}
-                          className="bg-gray-50 border border-gray-300 text-gray-900"
+                          className="bg-gray-50/80 backdrop-blur-sm border border-gray-300 text-gray-900 focus:border-emerald-500"
                         />
                         {selectedFile && (
-                          <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                            <Upload className="h-4 w-4 text-green-700" />
+                          <div className="flex items-center space-x-2 p-3 bg-emerald-50/80 backdrop-blur-sm rounded-lg border border-emerald-200">
+                            <Upload className="h-4 w-4 text-emerald-700" />
                             <div className="flex-1">
-                              <p className="text-green-800 text-sm font-medium">{selectedFile.name}</p>
-                              <p className="text-green-700 text-xs">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                              <p className="text-emerald-800 text-sm font-medium">{selectedFile.name}</p>
+                              <p className="text-emerald-700 text-xs">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
                             </div>
                           </div>
                         )}
@@ -765,10 +746,10 @@ const FaceRecognition = () => {
                     <Button 
                       onClick={handleAddUser} 
                       disabled={!newUserName.trim() || !selectedFile || loading}
-                      className="w-full bg-green-600 hover:bg-green-700 text-white py-3 shadow-lg"
+                      className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white py-3 shadow-lg border-0 font-semibold"
                       size="lg"
                     >
-                      {loading ? "Adding..." : "Add User"}
+                      {loading ? "Adding User..." : "Add User"}
                     </Button>
                   </div>
                 </DialogContent>
@@ -777,13 +758,13 @@ const FaceRecognition = () => {
           </CardHeader>
           <CardContent className={`space-y-3 ${isMobile ? 'max-h-60' : 'max-h-80'} overflow-y-auto p-6`}>
             {authorizedUsers.map((user) => (
-              <div key={user.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200 hover:from-gray-100 hover:to-blue-100 transition-all duration-300 shadow-sm">
+              <div key={user.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50/80 to-blue-50/80 backdrop-blur-sm rounded-lg border border-gray-200/50 hover:from-gray-100/80 hover:to-blue-100/80 transition-all duration-300 shadow-sm">
                 <div className="flex items-center space-x-4">
                   {user.image_url ? (
                     <img 
                       src={user.image_url} 
                       alt={user.name}
-                      className={`${isMobile ? 'w-12 h-12' : 'w-14 h-14'} rounded-full object-cover border-2 border-green-400 shadow-lg`}
+                      className={`${isMobile ? 'w-12 h-12' : 'w-14 h-14'} rounded-full object-cover border-2 border-emerald-400 shadow-lg`}
                     />
                   ) : (
                     <div className={`${isMobile ? 'w-12 h-12' : 'w-14 h-14'} bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center shadow-lg`}>
@@ -799,7 +780,7 @@ const FaceRecognition = () => {
                 </div>
                 <Badge 
                   variant={user.is_active ? "default" : "secondary"} 
-                  className={user.is_active ? 'bg-green-600 text-white shadow-lg' : 'bg-gray-400 text-white'}
+                  className={user.is_active ? 'bg-emerald-600 text-white shadow-lg border-0' : 'bg-gray-400 text-white border-0'}
                 >
                   {user.is_active ? "🟢 Active" : "⚪ Inactive"}
                 </Badge>
@@ -807,35 +788,35 @@ const FaceRecognition = () => {
             ))}
             {authorizedUsers.length === 0 && (
               <div className="text-center py-8">
-                <div className="p-4 bg-gray-100 rounded-full w-fit mx-auto mb-4">
+                <div className="p-4 bg-gray-100/80 backdrop-blur-sm rounded-full w-fit mx-auto mb-4">
                   <Users className="h-12 w-12 text-gray-400" />
                 </div>
-                <h3 className="text-gray-700 font-semibold mb-2">No Users</h3>
-                <p className="text-gray-600 text-sm">Add users to enable recognition</p>
+                <h3 className="text-gray-700 font-semibold mb-2">No Users Added</h3>
+                <p className="text-gray-600 text-sm">Add authorized users to enable face recognition</p>
               </div>
             )}
           </CardContent>
         </Card>
 
         {/* Detection Log */}
-        <Card className={`bg-white border border-purple-200 shadow-xl ${!isMobile ? 'lg:col-span-2' : ''}`}>
-          <CardHeader className="pb-4 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100">
+        <Card className={`bg-white/95 backdrop-blur-sm border border-gray-100 shadow-2xl hover:shadow-3xl transition-all duration-300 ${!isMobile ? 'lg:col-span-2' : ''}`}>
+          <CardHeader className="pb-4 bg-gradient-to-r from-purple-50/80 to-pink-50/80 border-b border-gray-100/50">
             <CardTitle className="flex items-center space-x-3">
-              <div className="p-3 bg-purple-600 rounded-xl shadow-lg">
+              <div className="p-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl shadow-lg">
                 <Eye className="h-6 w-6 text-white" />
               </div>
               <div>
                 <h3 className="text-xl font-bold text-gray-900">Detection Log</h3>
-                <p className="text-gray-600 text-sm">Recent face recognition events</p>
+                <p className="text-gray-600 text-sm">Recent face recognition events and security alerts</p>
               </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
             <div className="space-y-3">
               {recentDetections.map((detection, index) => (
-                <div key={index} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-purple-50 rounded-lg border border-gray-200 hover:from-gray-100 hover:to-purple-100 transition-all duration-300 shadow-sm">
+                <div key={index} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50/80 to-purple-50/80 backdrop-blur-sm rounded-lg border border-gray-200/50 hover:from-gray-100/80 hover:to-purple-100/80 transition-all duration-300 shadow-sm">
                   <div className="flex items-center space-x-4">
-                    <div className="text-sm text-gray-700 font-mono bg-gray-100 px-2 py-1 rounded shadow-sm">
+                    <div className="text-sm text-gray-700 font-mono bg-gray-100/80 backdrop-blur-sm px-2 py-1 rounded shadow-sm">
                       ⏰ {detection.time}
                     </div>
                     <div className="flex-1">
@@ -847,7 +828,7 @@ const FaceRecognition = () => {
                       </div>
                     </div>
                     {detection.confidence > 0 && (
-                      <div className="text-sm text-gray-700 bg-gray-100 px-2 py-1 rounded shadow-sm font-mono">
+                      <div className="text-sm text-gray-700 bg-gray-100/80 backdrop-blur-sm px-2 py-1 rounded shadow-sm font-mono">
                         {detection.confidence}%
                       </div>
                     )}
@@ -855,8 +836,8 @@ const FaceRecognition = () => {
                   <Badge 
                     variant={detection.status === "authorized" ? "default" : "destructive"}
                     className={detection.status === "authorized" 
-                      ? 'bg-green-600 text-white shadow-lg' 
-                      : 'bg-red-600 text-white shadow-lg'
+                      ? 'bg-emerald-600 text-white shadow-lg border-0' 
+                      : 'bg-red-600 text-white shadow-lg border-0'
                     }
                   >
                     {detection.status === "authorized" ? "🔓 AUTHORIZED" : "🔒 BLOCKED"}
@@ -865,11 +846,11 @@ const FaceRecognition = () => {
               ))}
               {recentDetections.length === 0 && (
                 <div className="text-center py-8">
-                  <div className="p-4 bg-gray-100 rounded-full w-fit mx-auto mb-4">
+                  <div className="p-4 bg-gray-100/80 backdrop-blur-sm rounded-full w-fit mx-auto mb-4">
                     <Eye className="h-12 w-12 text-gray-400" />
                   </div>
-                  <h3 className="text-gray-700 font-semibold mb-2">No Detections</h3>
-                  <p className="text-gray-600 text-sm">Start camera to begin monitoring</p>
+                  <h3 className="text-gray-700 font-semibold mb-2">No Detections Yet</h3>
+                  <p className="text-gray-600 text-sm">Start the camera to begin face detection monitoring</p>
                 </div>
               )}
             </div>
