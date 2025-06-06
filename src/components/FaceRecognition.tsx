@@ -45,10 +45,10 @@ const FaceRecognition = () => {
     sendAlertToReceivers
   } = useSecuritySystem();
 
-  // Initialize cameras with better error handling
+  // Improved camera initialization with better permission handling
   const initializeCameras = async () => {
     try {
-      setDebugInfo('Checking camera access...');
+      setDebugInfo('Checking camera support...');
       
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setCameraSupported(false);
@@ -57,9 +57,29 @@ const FaceRecognition = () => {
         return;
       }
 
-      // First get permission, then enumerate devices
-      await navigator.mediaDevices.getUserMedia({ video: true });
+      setDebugInfo('Requesting camera permission...');
       
+      // First request basic camera access without specific constraints
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          } 
+        });
+      } catch (permissionError) {
+        console.error('Permission denied:', permissionError);
+        setCameraError('Camera permission denied. Please refresh and allow camera access.');
+        setDebugInfo('Permission denied');
+        setCameraSupported(false);
+        return;
+      }
+
+      // Stop the test stream
+      stream.getTracks().forEach(track => track.stop());
+
+      // Now enumerate devices after getting permission
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       
@@ -69,24 +89,24 @@ const FaceRecognition = () => {
       if (videoDevices.length === 0) {
         setCameraError('No cameras found on this device');
         setDebugInfo('No cameras available');
+        setCameraSupported(false);
         return;
       }
 
-      // Don't auto-select a camera ID, let it use default
-      setSelectedCameraId('');
       setCameraError(null);
-      setDebugInfo(`${videoDevices.length} camera(s) ready`);
+      setCameraSupported(true);
+      setDebugInfo(`✅ Camera system ready with ${videoDevices.length} camera(s)`);
       toast.success(`Camera system initialized with ${videoDevices.length} camera(s)`);
       
     } catch (error) {
       console.error('Camera init error:', error);
-      setCameraError('Failed to access cameras. Please allow camera permission.');
+      setCameraError('Failed to initialize cameras. Please refresh the page.');
       setDebugInfo('Camera initialization failed');
       setCameraSupported(false);
     }
   };
 
-  // Improved camera start with fallback logic
+  // Simplified camera start function
   const startCamera = async () => {
     try {
       setCameraError(null);
@@ -99,27 +119,18 @@ const FaceRecognition = () => {
         streamRef.current = null;
       }
 
-      // Start with basic video constraints
-      const baseVideoConstraints = {
+      // Simple video constraints
+      const videoConstraints: MediaTrackConstraints = {
         width: { ideal: 640, min: 320 },
         height: { ideal: 480, min: 240 },
         frameRate: { ideal: 30, min: 15 }
       };
 
-      let videoConstraints: MediaTrackConstraints = baseVideoConstraints;
-
-      // Only add deviceId if we have a specific camera selected AND it exists
+      // Add device selection only if we have a specific camera
       if (selectedCameraId && availableCameras.some(cam => cam.deviceId === selectedCameraId)) {
-        videoConstraints = {
-          ...baseVideoConstraints,
-          deviceId: { ideal: selectedCameraId }
-        };
+        videoConstraints.deviceId = { exact: selectedCameraId };
       } else if (isMobile) {
-        // For mobile, use facing mode instead
-        videoConstraints = {
-          ...baseVideoConstraints,
-          facingMode: cameraMode
-        };
+        videoConstraints.facingMode = cameraMode;
       }
 
       const constraints: MediaStreamConstraints = {
@@ -135,14 +146,9 @@ const FaceRecognition = () => {
         
         videoRef.current.onloadedmetadata = () => {
           setRecognitionActive(true);
-          setDebugInfo('Camera active - detecting faces...');
+          setDebugInfo('✅ Camera active - detecting faces...');
           startFaceDetection();
           toast.success('Camera started successfully');
-        };
-        
-        videoRef.current.onerror = (error) => {
-          console.error('Video error:', error);
-          setCameraError('Video playback failed');
         };
         
         await videoRef.current.play();
@@ -153,18 +159,18 @@ const FaceRecognition = () => {
       
       if (error instanceof Error) {
         if (error.name === 'NotFoundError') {
-          errorMessage = 'Camera not found. Please check camera connection.';
-          // Reset camera selection and try again with default
-          setSelectedCameraId('');
+          errorMessage = 'Camera not found. Trying to reinitialize...';
+          // Try to reinitialize cameras
+          setTimeout(() => initializeCameras(), 1000);
         } else if (error.name === 'NotAllowedError') {
-          errorMessage = 'Camera permission denied. Please allow camera access.';
+          errorMessage = 'Camera permission denied. Please refresh and allow camera access.';
         } else if (error.name === 'NotReadableError') {
-          errorMessage = 'Camera is busy or unavailable.';
+          errorMessage = 'Camera is busy. Please close other apps using the camera.';
         }
       }
       
       setCameraError(errorMessage);
-      setDebugInfo('Camera start failed');
+      setDebugInfo('❌ Camera start failed');
       setRecognitionActive(false);
       toast.error(errorMessage);
     }

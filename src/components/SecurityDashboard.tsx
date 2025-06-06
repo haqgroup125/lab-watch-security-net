@@ -23,99 +23,132 @@ const SecurityDashboard = ({ alertCount, systemStatus }: SecurityDashboardProps)
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {/* System Overview */}
-      <Card className="bg-slate-800 border-slate-700 col-span-full">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2 text-white">
-            <Shield className="h-5 w-5 text-blue-400" />
-            <span>System Overview</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-400">3/3</div>
-              <div className="text-sm text-slate-400">Devices Online</div>
+    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-indigo-100 p-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
+        {/* System Overview */}
+        <Card className="bg-white/95 backdrop-blur-sm border border-gray-100 shadow-2xl hover:shadow-3xl transition-all duration-300 col-span-full">
+          <CardHeader className="pb-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-gray-100/50">
+            <CardTitle className="flex items-center space-x-3">
+              <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg">
+                <Shield className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">System Overview</h3>
+                <p className="text-gray-600 text-sm">Real-time security monitoring status</p>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center p-4 bg-gradient-to-r from-emerald-50/80 to-green-50/80 backdrop-blur-sm rounded-xl border border-emerald-200/50">
+                <div className="text-2xl font-bold text-emerald-600">3/3</div>
+                <div className="text-sm text-gray-700 font-medium">Devices Online</div>
+              </div>
+              <div className="text-center p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 backdrop-blur-sm rounded-xl border border-blue-200/50">
+                <div className="text-2xl font-bold text-blue-600">94%</div>
+                <div className="text-sm text-gray-700 font-medium">Recognition Accuracy</div>
+              </div>
+              <div className="text-center p-4 bg-gradient-to-r from-red-50/80 to-pink-50/80 backdrop-blur-sm rounded-xl border border-red-200/50">
+                <div className="text-2xl font-bold text-red-600">{alertCount}</div>
+                <div className="text-sm text-gray-700 font-medium">Alerts Today</div>
+              </div>
+              <div className="text-center p-4 bg-gradient-to-r from-amber-50/80 to-yellow-50/80 backdrop-blur-sm rounded-xl border border-amber-200/50">
+                <div className="text-2xl font-bold text-amber-600">2.1s</div>
+                <div className="text-sm text-gray-700 font-medium">Avg Response Time</div>
+              </div>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-400">94%</div>
-              <div className="text-sm text-slate-400">Recognition Accuracy</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-red-400">{alertCount}</div>
-              <div className="text-sm text-slate-400">Alerts Today</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-yellow-400">2.1s</div>
-              <div className="text-sm text-slate-400">Avg Response Time</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      {/* Device Status */}
-      <Card className="bg-slate-800 border-slate-700 md:col-span-2">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2 text-white">
-            <Wifi className="h-5 w-5 text-green-400" />
-            <span>Device Status</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {devices.map((device, index) => (
-            <div key={index} className="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
-              <div className="flex items-center space-x-3">
-                {device.type === "phone" ? (
-                  <Smartphone className="h-5 w-5 text-blue-400" />
-                ) : (
-                  <Cpu className="h-5 w-5 text-purple-400" />
-                )}
-                <div>
-                  <div className="font-medium text-white">{device.name}</div>
-                  <div className="text-sm text-slate-400">
-                    {device.accuracy && `Accuracy: ${device.accuracy}%`}
-                    {device.alerts && `Alerts: ${device.alerts}`}
-                    {device.uptime && `Uptime: ${device.uptime}`}
+        {/* Device Status */}
+        <Card className="bg-white/95 backdrop-blur-sm border border-gray-100 shadow-2xl hover:shadow-3xl transition-all duration-300 md:col-span-2">
+          <CardHeader className="pb-4 bg-gradient-to-r from-emerald-50/80 to-green-50/80 border-b border-gray-100/50">
+            <CardTitle className="flex items-center space-x-3">
+              <div className="p-3 bg-gradient-to-r from-emerald-600 to-green-600 rounded-xl shadow-lg">
+                <Wifi className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Device Status</h3>
+                <p className="text-gray-600 text-sm">Connected security devices</p>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 p-6">
+            {devices.map((device, index) => (
+              <div key={index} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50/80 to-blue-50/80 backdrop-blur-sm rounded-lg border border-gray-200/50 hover:from-gray-100/80 hover:to-blue-100/80 transition-all duration-300 shadow-sm">
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-white rounded-lg shadow-sm">
+                    {device.type === "phone" ? (
+                      <Smartphone className="h-5 w-5 text-blue-600" />
+                    ) : (
+                      <Cpu className="h-5 w-5 text-purple-600" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-semibold text-gray-900">{device.name}</div>
+                    <div className="text-sm text-gray-600">
+                      {device.accuracy && `Accuracy: ${device.accuracy}%`}
+                      {device.alerts && `Alerts: ${device.alerts}`}
+                      {device.uptime && `Uptime: ${device.uptime}`}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <Badge variant={device.status === "online" ? "default" : "destructive"}>
-                {device.status}
-              </Badge>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Recent Alerts */}
-      <Card className="bg-slate-800 border-slate-700">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2 text-white">
-            <AlertTriangle className="h-5 w-5 text-red-400" />
-            <span>Recent Alerts</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {recentAlerts.map((alert, index) => (
-            <div key={index} className="flex items-center justify-between p-2 bg-slate-700 rounded">
-              <div className="flex items-center space-x-2">
-                <Clock className="h-4 w-4 text-slate-400" />
-                <span className="text-sm text-white">{alert.time}</span>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-white">{alert.type}</div>
                 <Badge 
-                  variant={alert.severity === "high" ? "destructive" : alert.severity === "medium" ? "secondary" : "outline"}
-                  className="text-xs"
+                  variant={device.status === "online" ? "default" : "destructive"}
+                  className={device.status === "online" 
+                    ? 'bg-emerald-600 text-white shadow-lg border-0' 
+                    : 'bg-red-600 text-white shadow-lg border-0'
+                  }
                 >
-                  {alert.severity}
+                  {device.status === "online" ? "🟢 Online" : "🔴 Offline"}
                 </Badge>
               </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Recent Alerts */}
+        <Card className="bg-white/95 backdrop-blur-sm border border-gray-100 shadow-2xl hover:shadow-3xl transition-all duration-300">
+          <CardHeader className="pb-4 bg-gradient-to-r from-red-50/80 to-pink-50/80 border-b border-gray-100/50">
+            <CardTitle className="flex items-center space-x-3">
+              <div className="p-3 bg-gradient-to-r from-red-600 to-pink-600 rounded-xl shadow-lg">
+                <AlertTriangle className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Recent Alerts</h3>
+                <p className="text-gray-600 text-sm">Latest security events</p>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 p-6">
+            {recentAlerts.map((alert, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50/80 to-red-50/80 backdrop-blur-sm rounded-lg border border-gray-200/50 hover:from-gray-100/80 hover:to-red-100/80 transition-all duration-300 shadow-sm">
+                <div className="flex items-center space-x-3">
+                  <div className="p-1 bg-white rounded shadow-sm">
+                    <Clock className="h-4 w-4 text-gray-600" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-mono text-gray-800 bg-gray-100/80 backdrop-blur-sm px-2 py-1 rounded">{alert.time}</span>
+                    <div className="text-sm font-medium text-gray-900 mt-1">{alert.type}</div>
+                  </div>
+                </div>
+                <Badge 
+                  variant={alert.severity === "high" ? "destructive" : alert.severity === "medium" ? "secondary" : "outline"}
+                  className={
+                    alert.severity === "high" 
+                      ? 'bg-red-600 text-white shadow-lg border-0' 
+                      : alert.severity === "medium"
+                      ? 'bg-amber-500 text-white shadow-lg border-0'
+                      : 'bg-gray-400 text-white shadow-lg border-0'
+                  }
+                >
+                  {alert.severity.toUpperCase()}
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };

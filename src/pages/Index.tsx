@@ -28,34 +28,43 @@ const Index = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-indigo-100">
       {/* Header */}
-      <div className="bg-slate-800 border-b border-slate-700">
+      <div className="bg-white/95 backdrop-blur-sm border-b border-gray-200/50 shadow-lg">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <Shield className="h-8 w-8 text-blue-400" />
+              <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg">
+                <Shield className="h-8 w-8 text-white" />
+              </div>
               <div>
-                <h1 className="text-2xl font-bold">Lab Security System</h1>
-                <p className="text-slate-400 text-sm">Real-time Face Recognition & Alert Network</p>
+                <h1 className="text-2xl font-bold text-gray-900">Lab Security System</h1>
+                <p className="text-gray-600 text-sm">Real-time Face Recognition & Alert Network</p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <Badge variant={systemStatus === "active" ? "default" : "destructive"} className="px-3 py-1">
+              <Badge 
+                variant={systemStatus === "active" ? "default" : "destructive"} 
+                className={systemStatus === "active" 
+                  ? 'bg-emerald-600 text-white px-3 py-1 shadow-lg border-0' 
+                  : 'bg-red-600 text-white px-3 py-1 shadow-lg border-0'
+                }
+              >
                 {systemStatus === "active" ? (
                   <><CheckCircle className="h-3 w-3 mr-1" /> System Active</>
                 ) : (
                   <><AlertTriangle className="h-3 w-3 mr-1" /> System Alert</>
                 )}
               </Badge>
-              <div className="text-right">
-                <div className="text-sm text-slate-400">Alerts Today</div>
-                <div className="text-xl font-bold text-red-400">{alertCount}</div>
+              <div className="text-right p-3 bg-white/80 backdrop-blur-sm rounded-lg border border-gray-200 shadow-sm">
+                <div className="text-sm text-gray-600 font-medium">Alerts Today</div>
+                <div className="text-xl font-bold text-red-600">{alertCount}</div>
               </div>
               <Button 
                 variant="outline" 
                 size="sm"
                 onClick={() => window.open('/alert-receiver', '_blank')}
+                className="bg-white/80 backdrop-blur-sm border border-gray-200 hover:bg-gray-50/80 text-gray-900 font-semibold shadow-lg"
               >
                 <Smartphone className="h-4 w-4 mr-2" />
                 Open App 2
@@ -68,24 +77,39 @@ const Index = () => {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-6">
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 bg-slate-800 border-slate-700">
-            <TabsTrigger value="dashboard" className="flex items-center space-x-2">
+          <TabsList className="grid w-full grid-cols-5 bg-white/95 backdrop-blur-sm border border-gray-200 shadow-lg rounded-xl p-2">
+            <TabsTrigger 
+              value="dashboard" 
+              className="flex items-center space-x-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg rounded-lg transition-all duration-300"
+            >
               <Shield className="h-4 w-4" />
               <span>Dashboard</span>
             </TabsTrigger>
-            <TabsTrigger value="face-recognition" className="flex items-center space-x-2">
+            <TabsTrigger 
+              value="face-recognition" 
+              className="flex items-center space-x-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg rounded-lg transition-all duration-300"
+            >
               <Camera className="h-4 w-4" />
               <span>Face Recognition</span>
             </TabsTrigger>
-            <TabsTrigger value="alerts" className="flex items-center space-x-2">
+            <TabsTrigger 
+              value="alerts" 
+              className="flex items-center space-x-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg rounded-lg transition-all duration-300"
+            >
               <Bell className="h-4 w-4" />
               <span>Alert Monitor</span>
             </TabsTrigger>
-            <TabsTrigger value="alert-receiver" className="flex items-center space-x-2">
+            <TabsTrigger 
+              value="alert-receiver" 
+              className="flex items-center space-x-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg rounded-lg transition-all duration-300"
+            >
               <Smartphone className="h-4 w-4" />
               <span>Alert Receiver</span>
             </TabsTrigger>
-            <TabsTrigger value="esp32" className="flex items-center space-x-2">
+            <TabsTrigger 
+              value="esp32" 
+              className="flex items-center space-x-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg rounded-lg transition-all duration-300"
+            >
               <Cpu className="h-4 w-4" />
               <span>ESP32 Control</span>
             </TabsTrigger>
