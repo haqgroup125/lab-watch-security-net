@@ -99,28 +99,32 @@ const FaceRecognition = () => {
         streamRef.current = null;
       }
 
-      // Start with basic constraints and add specific camera if available
-      let constraints: MediaStreamConstraints = {
-        video: {
-          width: { ideal: 640, min: 320 },
-          height: { ideal: 480, min: 240 },
-          frameRate: { ideal: 30, min: 15 }
-        }
+      // Start with basic video constraints
+      const baseVideoConstraints = {
+        width: { ideal: 640, min: 320 },
+        height: { ideal: 480, min: 240 },
+        frameRate: { ideal: 30, min: 15 }
       };
+
+      let videoConstraints: MediaTrackConstraints = baseVideoConstraints;
 
       // Only add deviceId if we have a specific camera selected AND it exists
       if (selectedCameraId && availableCameras.some(cam => cam.deviceId === selectedCameraId)) {
-        constraints.video = {
-          ...constraints.video,
+        videoConstraints = {
+          ...baseVideoConstraints,
           deviceId: { ideal: selectedCameraId }
         };
       } else if (isMobile) {
         // For mobile, use facing mode instead
-        constraints.video = {
-          ...constraints.video,
+        videoConstraints = {
+          ...baseVideoConstraints,
           facingMode: cameraMode
         };
       }
+
+      const constraints: MediaStreamConstraints = {
+        video: videoConstraints
+      };
 
       console.log('Starting camera with constraints:', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
