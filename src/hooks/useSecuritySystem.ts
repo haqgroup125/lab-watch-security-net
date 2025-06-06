@@ -37,10 +37,31 @@ export interface ESP32Device {
   created_at: string;
 }
 
+export interface SystemSettings {
+  detection_sensitivity: number;
+  alert_threshold: number;
+  auto_acknowledgment: boolean;
+  notification_sounds: boolean;
+  camera_resolution: string;
+  detection_interval: number;
+  max_detection_distance: number;
+  face_confidence_threshold: number;
+}
+
 export const useSecuritySystem = () => {
   const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [esp32Devices, setESP32Devices] = useState<ESP32Device[]>([]);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>({
+    detection_sensitivity: 75,
+    alert_threshold: 65,
+    auto_acknowledgment: false,
+    notification_sounds: true,
+    camera_resolution: '720p',
+    detection_interval: 1000,
+    max_detection_distance: 5,
+    face_confidence_threshold: 70,
+  });
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -72,10 +93,9 @@ export const useSecuritySystem = () => {
         .from('security_alerts')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(50);
       
       if (error) throw error;
-      // Type assertion to ensure proper typing
       const typedAlerts = (data || []).map(alert => ({
         ...alert,
         severity: alert.severity as 'low' | 'medium' | 'high'
@@ -100,7 +120,6 @@ export const useSecuritySystem = () => {
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      // Type assertion to ensure proper typing
       const typedDevices = (data || []).map(device => ({
         ...device,
         ip_address: device.ip_address as string,
@@ -121,7 +140,6 @@ export const useSecuritySystem = () => {
   const addAuthorizedUser = async (name: string, imageFile: File) => {
     setLoading(true);
     try {
-      // Upload image to storage
       const fileExt = imageFile.name.split('.').pop();
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `faces/${fileName}`;
@@ -132,12 +150,10 @@ export const useSecuritySystem = () => {
 
       if (uploadError) throw uploadError;
 
-      // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('face-images')
         .getPublicUrl(filePath);
 
-      // Insert user record
       const { data, error } = await supabase
         .from('authorized_users')
         .insert({
@@ -161,6 +177,35 @@ export const useSecuritySystem = () => {
       toast({
         title: "Error",
         description: "Failed to add authorized user",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete authorized user
+  const deleteAuthorizedUser = async (userId: string, userName: string) => {
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('authorized_users')
+        .update({ is_active: false })
+        .eq('id', userId);
+
+      if (error) throw error;
+
+      toast({
+        title: "User Removed",
+        description: `${userName} has been removed from authorized users`,
+      });
+
+      fetchAuthorizedUsers();
+    } catch (error) {
+      console.error('Error deleting authorized user:', error);
+      toast({
+        title: "Error",
+        description: "Failed to remove authorized user",
         variant: "destructive",
       });
     } finally {
@@ -204,6 +249,35 @@ export const useSecuritySystem = () => {
     }
   };
 
+  // Acknowledge alert
+  const acknowledgeAlert = async (alertId: string) => {
+    try {
+      const { error } = await supabase
+        .from('security_alerts')
+        .update({ 
+          acknowledged: true, 
+          acknowledged_at: new Date().toISOString() 
+        })
+        .eq('id', alertId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Alert Acknowledged",
+        description: "Alert has been marked as acknowledged",
+      });
+
+      fetchAlerts();
+    } catch (error) {
+      console.error('Error acknowledging alert:', error);
+      toast({
+        title: "Error",
+        description: "Failed to acknowledge alert",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Send alert to ESP32
   const sendAlertToESP32 = async (deviceIp: string, alertData: any) => {
     try {
@@ -213,6 +287,7 @@ export const useSecuritySystem = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(alertData),
+        signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
       if (!response.ok) throw new Error('Failed to send alert to ESP32');
@@ -224,8 +299,8 @@ export const useSecuritySystem = () => {
     } catch (error) {
       console.error('Error sending alert to ESP32:', error);
       toast({
-        title: "Error",
-        description: `Failed to send alert to ESP32 at ${deviceIp}`,
+        title: "ESP32 Connection Error",
+        description: `Failed to send alert to ESP32 at ${deviceIp}. Check device connection.`,
         variant: "destructive",
       });
     }
@@ -249,6 +324,7 @@ export const useSecuritySystem = () => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(alertData),
+            signal: AbortSignal.timeout(3000),
           });
           return { receiver: receiver.device_name, success: response.ok };
         } catch (error) {
@@ -268,22 +344,99 @@ export const useSecuritySystem = () => {
     }
   };
 
+  // Update system settings
+  const updateSystemSettings = async (newSettings: Partial<SystemSettings>) => {
+    try {
+      setSystemSettings(prev => ({ ...prev, ...newSettings }));
+      
+      // Store in localStorage for persistence
+      localStorage.setItem('security_system_settings', JSON.stringify({
+        ...systemSettings,
+        ...newSettings
+      }));
+
+      toast({
+        title: "Settings Updated",
+        description: "System settings have been saved successfully",
+      });
+    } catch (error) {
+      console.error('Error updating system settings:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update system settings",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Load system settings
+  const loadSystemSettings = () => {
+    try {
+      const savedSettings = localStorage.getItem('security_system_settings');
+      if (savedSettings) {
+        setSystemSettings(JSON.parse(savedSettings));
+      }
+    } catch (error) {
+      console.error('Error loading system settings:', error);
+    }
+  };
+
+  // Test all ESP32 devices
+  const testAllESP32Devices = async () => {
+    const results = [];
+    for (const device of esp32Devices) {
+      if (device.ip_address) {
+        try {
+          const response = await fetch(`http://${device.ip_address}/status`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(3000),
+          });
+          results.push({
+            device: device.device_name,
+            status: response.ok ? 'online' : 'error',
+            ip: device.ip_address
+          });
+        } catch {
+          results.push({
+            device: device.device_name,
+            status: 'offline',
+            ip: device.ip_address
+          });
+        }
+      }
+    }
+    
+    const onlineCount = results.filter(r => r.status === 'online').length;
+    toast({
+      title: "Device Test Complete",
+      description: `${onlineCount}/${results.length} ESP32 devices are online`,
+    });
+    
+    return results;
+  };
+
   // Initialize data fetching
   useEffect(() => {
     fetchAuthorizedUsers();
     fetchAlerts();
     fetchESP32Devices();
+    loadSystemSettings();
   }, []);
 
   return {
     authorizedUsers,
     alerts,
     esp32Devices,
+    systemSettings,
     loading,
     addAuthorizedUser,
+    deleteAuthorizedUser,
     createAlert,
+    acknowledgeAlert,
     sendAlertToESP32,
     sendAlertToReceivers,
+    updateSystemSettings,
+    testAllESP32Devices,
     fetchAuthorizedUsers,
     fetchAlerts,
     fetchESP32Devices,

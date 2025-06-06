@@ -5,7 +5,19 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Camera, Users, Upload, AlertTriangle, CheckCircle, RotateCcw, Zap } from "lucide-react";
+import { 
+  Camera, 
+  Users, 
+  Upload, 
+  AlertTriangle, 
+  CheckCircle, 
+  RotateCcw, 
+  Zap,
+  Trash2,
+  RefreshCw,
+  Settings,
+  Activity
+} from "lucide-react";
 import { useSecuritySystem } from "@/hooks/useSecuritySystem";
 import { useToast } from "@/hooks/use-toast";
 
@@ -19,6 +31,13 @@ const FaceRecognition = () => {
   const [newUserName, setNewUserName] = useState('');
   const [newUserFile, setNewUserFile] = useState<File | null>(null);
   const [esp32IP, setEsp32IP] = useState('192.168.1.100');
+  const [detectionLogs, setDetectionLogs] = useState<Array<{
+    id: string;
+    timestamp: string;
+    person: string;
+    confidence: number;
+    authorized: boolean;
+  }>>([]);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -26,17 +45,51 @@ const FaceRecognition = () => {
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const frameCountRef = useRef(0);
 
-  const { authorizedUsers, loading, addAuthorizedUser, createAlert, sendAlertToESP32 } = useSecuritySystem();
+  const { 
+    authorizedUsers, 
+    systemSettings,
+    loading, 
+    addAuthorizedUser, 
+    deleteAuthorizedUser,
+    createAlert, 
+    sendAlertToESP32 
+  } = useSecuritySystem();
   const { toast } = useToast();
 
-  // Initialize cameras
+  // Initialize cameras with better error handling
   const initializeCameras = useCallback(async () => {
     try {
       console.log('Initializing cameras...');
       
-      // Request camera permission first
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach(track => track.stop()); // Stop the test stream
+      // First check if getUserMedia is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera access not supported in this browser');
+      }
+
+      // Request camera permission with retry logic
+      let stream: MediaStream | null = null;
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`Camera access attempt ${attempt}/${maxRetries}`);
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: { ideal: 1280, min: 640 },
+              height: { ideal: 720, min: 480 }
+            } 
+          });
+          break;
+        } catch (error) {
+          console.log(`Attempt ${attempt} failed:`, error);
+          if (attempt === maxRetries) throw error;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
       
       // Get available devices
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -54,11 +107,21 @@ const FaceRecognition = () => {
       } else {
         throw new Error('No video devices found');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Camera initialization failed:', error);
+      let errorMessage = 'Failed to access cameras.';
+      
+      if (error.name === 'NotAllowedError') {
+        errorMessage = 'Camera permission denied. Please allow camera access and refresh the page.';
+      } else if (error.name === 'NotFoundError') {
+        errorMessage = 'No cameras found. Please connect a camera and refresh the page.';
+      } else if (error.name === 'NotReadableError') {
+        errorMessage = 'Camera is already in use by another application.';
+      }
+      
       toast({
         title: "Camera Error",
-        description: "Failed to access cameras. Please check permissions.",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -162,7 +225,7 @@ const FaceRecognition = () => {
     }
   }, [availableDevices, currentDevice, isStreaming, stopCamera]);
 
-  // Enhanced face detection with better algorithms
+  // Enhanced face detection with system settings integration
   const detectFaces = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
@@ -173,19 +236,14 @@ const FaceRecognition = () => {
     if (!ctx) return;
 
     frameCountRef.current++;
-    
-    // Set canvas size to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    
-    // Draw current frame
     ctx.drawImage(video, 0, 0);
     
     try {
-      // Enhanced face detection using multiple methods
       let faces: any[] = [];
       
-      // Method 1: Browser FaceDetector API (if available)
+      // Enhanced face detection using multiple methods
       if ('FaceDetector' in window) {
         try {
           const faceDetector = new (window as any).FaceDetector({
@@ -193,18 +251,15 @@ const FaceRecognition = () => {
             fastMode: false
           });
           faces = await faceDetector.detect(canvas);
-          console.log('FaceDetector API found faces:', faces.length);
         } catch (e) {
           console.log('FaceDetector API failed, using fallback');
         }
       }
       
-      // Method 2: Enhanced pattern recognition fallback
       if (faces.length === 0) {
         faces = await detectFacesPatternRecognition(ctx, canvas.width, canvas.height);
       }
       
-      // Clear previous drawings
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0);
       
@@ -212,27 +267,34 @@ const FaceRecognition = () => {
         setDetectionStatus('scanning');
         
         for (const face of faces) {
-          // Draw bounding box
           const box = face.boundingBox || face;
           ctx.strokeStyle = '#00ff00';
           ctx.lineWidth = 3;
           ctx.strokeRect(box.x, box.y, box.width, box.height);
           
-          // Extract face region for recognition
           const faceImageData = ctx.getImageData(box.x, box.y, box.width, box.height);
           const recognitionResult = await recognizeFace(faceImageData);
+          
+          // Log detection
+          const logEntry = {
+            id: Date.now().toString(),
+            timestamp: new Date().toISOString(),
+            person: recognitionResult.isAuthorized ? recognitionResult.name : 'Unknown',
+            confidence: recognitionResult.confidence,
+            authorized: recognitionResult.isAuthorized
+          };
+          
+          setDetectionLogs(prev => [logEntry, ...prev.slice(0, 49)]); // Keep last 50 logs
           
           if (recognitionResult.isAuthorized) {
             setDetectionStatus('authorized');
             setLastDetection(recognitionResult.name);
             setConfidence(recognitionResult.confidence);
             
-            // Draw green box for authorized
             ctx.strokeStyle = '#00ff00';
             ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
             ctx.fillRect(box.x, box.y, box.width, box.height);
             
-            // Log authorized access
             await createAlert({
               alert_type: 'Authorized Access',
               severity: 'low',
@@ -247,16 +309,13 @@ const FaceRecognition = () => {
             setLastDetection('Unknown Person');
             setConfidence(recognitionResult.confidence);
             
-            // Draw red box for unauthorized
             ctx.strokeStyle = '#ff0000';
             ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
             ctx.fillRect(box.x, box.y, box.width, box.height);
             
-            // Trigger security alert
             await handleUnauthorizedDetection(recognitionResult.confidence);
           }
           
-          // Draw confidence text
           ctx.fillStyle = recognitionResult.isAuthorized ? '#00ff00' : '#ff0000';
           ctx.font = '16px Arial';
           ctx.fillText(
@@ -274,7 +333,7 @@ const FaceRecognition = () => {
     } catch (error) {
       console.error('Face detection error:', error);
     }
-  }, [createAlert]);
+  }, [createAlert, systemSettings]);
 
   // Enhanced pattern recognition fallback
   const detectFacesPatternRecognition = async (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -358,7 +417,7 @@ const FaceRecognition = () => {
     return (darkPixelsUpper / totalPixelsUpper) > 0.1;
   };
 
-  // Enhanced face recognition with multiple comparison methods
+  // Enhanced face recognition with system settings
   const recognizeFace = async (faceImageData: ImageData): Promise<{
     isAuthorized: boolean;
     name: string;
@@ -377,8 +436,8 @@ const FaceRecognition = () => {
         }
       }
       
-      // Authorization threshold
-      const isAuthorized = bestMatch.confidence >= 65;
+      // Use system settings threshold
+      const isAuthorized = bestMatch.confidence >= systemSettings.face_confidence_threshold;
       
       return {
         isAuthorized,
@@ -530,12 +589,11 @@ const FaceRecognition = () => {
     return (similarity / blocks / 255) * 100;
   };
 
-  // Handle unauthorized detection
+  // Handle unauthorized detection with ESP32 integration
   const handleUnauthorizedDetection = async (confidence: number) => {
     try {
       console.log('Unauthorized person detected!');
       
-      // Create high-priority alert
       await createAlert({
         alert_type: 'Unauthorized Face Detected',
         severity: 'high',
@@ -545,18 +603,39 @@ const FaceRecognition = () => {
         confidence_score: confidence,
       });
       
-      // Send alert to ESP32
+      // Send alert to ESP32 with detailed payload
       if (esp32IP) {
         await sendAlertToESP32(esp32IP, {
           type: 'unauthorized_face',
           severity: 'high',
           message: 'Unauthorized person detected',
           timestamp: new Date().toISOString(),
-          confidence: confidence
+          confidence: confidence,
+          location: 'Face Recognition Camera',
+          action_required: true
         });
       }
       
-      // Visual/audio feedback
+      // Play sound if enabled
+      if (systemSettings.notification_sounds) {
+        try {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+          
+          oscillator.start();
+          oscillator.stop(audioContext.currentTime + 0.5);
+        } catch (error) {
+          console.log('Audio notification failed:', error);
+        }
+      }
+      
       toast({
         title: "SECURITY ALERT",
         description: "Unauthorized person detected!",
@@ -568,7 +647,7 @@ const FaceRecognition = () => {
     }
   };
 
-  // Start detection loop
+  // Start detection with system settings interval
   const startDetection = useCallback(() => {
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current);
@@ -576,10 +655,17 @@ const FaceRecognition = () => {
     
     detectionIntervalRef.current = setInterval(() => {
       detectFaces();
-    }, 1000); // Detect every second
-  }, [detectFaces]);
+    }, systemSettings.detection_interval);
+  }, [detectFaces, systemSettings.detection_interval]);
 
-  // Add user
+  // Handle user deletion
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    if (window.confirm(`Are you sure you want to remove ${userName} from authorized users?`)) {
+      await deleteAuthorizedUser(userId, userName);
+    }
+  };
+
+  // Add user with validation
   const handleAddUser = async () => {
     if (!newUserName.trim() || !newUserFile) {
       toast({
@@ -590,12 +676,30 @@ const FaceRecognition = () => {
       return;
     }
     
+    // Validate image file
+    if (!newUserFile.type.startsWith('image/')) {
+      toast({
+        title: "Invalid File",
+        description: "Please select a valid image file",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (newUserFile.size > 5 * 1024 * 1024) { // 5MB limit
+      toast({
+        title: "File Too Large",
+        description: "Please select an image smaller than 5MB",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     try {
       await addAuthorizedUser(newUserName.trim(), newUserFile);
       setNewUserName('');
       setNewUserFile(null);
       
-      // Reset file input
       const fileInput = document.getElementById('user-photo') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
       
@@ -609,16 +713,21 @@ const FaceRecognition = () => {
     initializeCameras();
     
     return () => {
-      stopCamera();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+      }
     };
-  }, [initializeCameras, stopCamera]);
+  }, [initializeCameras]);
 
-  // Re-start camera when device changes
+  // Re-start detection when settings change
   useEffect(() => {
-    if (currentDevice && isStreaming) {
-      startCamera();
+    if (isStreaming) {
+      startDetection();
     }
-  }, [currentDevice]);
+  }, [systemSettings.detection_interval, isStreaming, startDetection]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-indigo-100 p-4">
@@ -778,7 +887,7 @@ const FaceRecognition = () => {
           </CardContent>
         </Card>
 
-        {/* Add Authorized User */}
+        {/* Add Authorized User with improved UI */}
         <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
           <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-gray-100">
             <CardTitle className="flex items-center space-x-3">
@@ -787,15 +896,16 @@ const FaceRecognition = () => {
               </div>
               <div>
                 <h3 className="text-xl font-bold text-gray-900">Manage Authorized Users</h3>
-                <p className="text-gray-600 text-sm">Add users for face recognition</p>
+                <p className="text-gray-600 text-sm">Add or remove users for face recognition</p>
               </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               
               {/* Add User Form */}
               <div className="space-y-4">
+                <h4 className="font-semibold text-gray-900">Add New User</h4>
                 <div>
                   <Label htmlFor="user-name" className="text-sm font-medium text-gray-700">Full Name</Label>
                   <Input
@@ -817,7 +927,7 @@ const FaceRecognition = () => {
                     className="mt-1 bg-white border-gray-300"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Upload a clear, well-lit photo for best recognition accuracy
+                    Upload a clear, well-lit photo (max 5MB) for best recognition accuracy
                   </p>
                 </div>
                 
@@ -827,32 +937,56 @@ const FaceRecognition = () => {
                   className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
                 >
                   <Upload className="h-4 w-4 mr-2" />
-                  Add Authorized User
+                  {loading ? "Adding..." : "Add Authorized User"}
                 </Button>
               </div>
               
-              {/* Existing Users */}
+              {/* Existing Users with Delete Option */}
               <div className="space-y-3">
-                <h4 className="font-semibold text-gray-900">Authorized Users ({authorizedUsers.length})</h4>
-                <div className="max-h-64 overflow-y-auto space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-gray-900">Authorized Users ({authorizedUsers.length})</h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.location.reload()}
+                    className="bg-white"
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Refresh
+                  </Button>
+                </div>
+                <div className="max-h-80 overflow-y-auto space-y-2">
                   {authorizedUsers.map((user) => (
-                    <div key={user.id} className="flex items-center space-x-3 p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
-                      {user.image_url && (
-                        <img 
-                          src={user.image_url} 
-                          alt={user.name}
-                          className="w-10 h-10 rounded-full object-cover border border-gray-300"
-                        />
-                      )}
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900">{user.name}</div>
-                        <div className="text-xs text-gray-500">
-                          Added {new Date(user.created_at).toLocaleDateString()}
+                    <div key={user.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+                      <div className="flex items-center space-x-3">
+                        {user.image_url && (
+                          <img 
+                            src={user.image_url} 
+                            alt={user.name}
+                            className="w-12 h-12 rounded-full object-cover border-2 border-gray-300"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium text-gray-900">{user.name}</div>
+                          <div className="text-xs text-gray-500">
+                            Added {new Date(user.created_at).toLocaleDateString()}
+                          </div>
                         </div>
                       </div>
-                      <Badge variant="outline" className="bg-white text-green-600 border-green-300">
-                        Active
-                      </Badge>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant="outline" className="bg-white text-green-600 border-green-300">
+                          Active
+                        </Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteUser(user.id, user.name)}
+                          disabled={loading}
+                          className="bg-white border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                   
@@ -865,6 +999,54 @@ const FaceRecognition = () => {
                   )}
                 </div>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Detection Logs */}
+        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
+          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100">
+            <CardTitle className="flex items-center space-x-3">
+              <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg">
+                <Activity className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Detection Logs</h3>
+                <p className="text-gray-600 text-sm">Recent face detection events</p>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="max-h-64 overflow-y-auto space-y-2">
+              {detectionLogs.slice(0, 20).map((log) => (
+                <div key={log.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-3 h-3 rounded-full ${log.authorized ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <div>
+                      <div className="font-medium text-gray-900">{log.person}</div>
+                      <div className="text-xs text-gray-500">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Badge variant="outline" className="bg-white">
+                      {log.confidence}%
+                    </Badge>
+                    <Badge className={log.authorized ? "bg-green-100 text-green-700 border-green-300" : "bg-red-100 text-red-700 border-red-300"}>
+                      {log.authorized ? 'Authorized' : 'Unauthorized'}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+              
+              {detectionLogs.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <Activity className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                  <p>No detection logs yet</p>
+                  <p className="text-sm">Start camera to begin monitoring</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
