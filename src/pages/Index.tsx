@@ -11,24 +11,71 @@ import { useSecuritySystem } from '@/hooks/useSecuritySystem';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [showSystemSettings, setShowSystemSettings] = useState(false);
+  
   const { 
     authorizedUsers, 
     alerts, 
-    esp32Status,
-    addUser,
-    deleteUser,
-    sendAlert,
-    connectESP32,
-    triggerAlert,
-    clearAlert 
+    esp32Devices,
+    systemSettings,
+    loading,
+    addAuthorizedUser,
+    deleteAuthorizedUser,
+    createAlert,
+    acknowledgeAlert,
+    sendAlertToESP32,
+    sendAlertToReceivers,
+    updateSystemSettings,
+    testAllESP32Devices,
+    fetchAuthorizedUsers,
+    fetchAlerts,
+    fetchESP32Devices,
   } = useSecuritySystem();
+
+  // Helper functions to match expected interface
+  const addUser = (name: string, imageFile: File) => {
+    return addAuthorizedUser(name, imageFile);
+  };
+
+  const deleteUser = (userId: string, userName: string) => {
+    return deleteAuthorizedUser(userId, userName);
+  };
+
+  const sendAlert = (deviceIp: string, alertData: any) => {
+    return sendAlertToESP32(deviceIp, alertData);
+  };
+
+  const connectESP32 = async (deviceData: any) => {
+    // Implementation for connecting ESP32
+    console.log('Connecting to ESP32:', deviceData);
+    await testAllESP32Devices();
+  };
+
+  const triggerAlert = (message: string, severity: 'low' | 'medium' | 'high') => {
+    return createAlert({
+      alert_type: 'Manual Alert',
+      severity,
+      details: message,
+      source_device: 'Dashboard'
+    });
+  };
+
+  const clearAlert = (alertId: string) => {
+    return acknowledgeAlert(alertId);
+  };
+
+  // Calculate ESP32 status from devices
+  const esp32Status = {
+    connected: esp32Devices.some(device => device.status === 'online'),
+    devices: esp32Devices
+  };
 
   // Calculate dashboard stats
   const dashboardStats = {
     totalUsers: authorizedUsers.length,
     activeAlerts: alerts.filter(alert => !alert.acknowledged).length,
     esp32Status: esp32Status.connected ? 'online' as const : 'offline' as const,
-    cameraStatus: 'inactive' as const, // This will be updated based on camera state
+    cameraStatus: 'inactive' as const,
     systemHealth: esp32Status.connected ? 95 : 75,
     lastUpdate: new Date().toLocaleTimeString()
   };
@@ -117,6 +164,7 @@ const Index = () => {
             <TabsTrigger 
               value="settings" 
               className="flex items-center space-x-2 data-[state=active]:bg-background"
+              onClick={() => setShowSystemSettings(true)}
             >
               <Settings className="h-4 w-4" />
               <span className="hidden sm:inline">Settings</span>
@@ -154,7 +202,10 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="settings" className="space-y-6">
-            <SystemSettings />
+            <SystemSettings 
+              isOpen={showSystemSettings}
+              onClose={() => setShowSystemSettings(false)}
+            />
           </TabsContent>
         </Tabs>
       </div>
