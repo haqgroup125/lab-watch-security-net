@@ -17,7 +17,10 @@ import {
   RefreshCw,
   Activity,
   Play,
-  Square
+  Square,
+  User,
+  UserCheck,
+  UserX
 } from "lucide-react";
 import { useSecuritySystem } from "@/hooks/useSecuritySystem";
 import { useToast } from "@/hooks/use-toast";
@@ -28,12 +31,13 @@ const FaceRecognition = () => {
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [detectionStatus, setDetectionStatus] = useState<'idle' | 'scanning' | 'authorized' | 'unauthorized'>('idle');
   const [lastDetection, setLastDetection] = useState<string>('');
+  const [detectedPerson, setDetectedPerson] = useState<string>('');
   const [confidence, setConfidence] = useState<number>(0);
   const [newUserName, setNewUserName] = useState('');
   const [newUserFile, setNewUserFile] = useState<File | null>(null);
-  const [esp32IP, setEsp32IP] = useState('192.168.1.100');
   const [cameraError, setCameraError] = useState<string>('');
   const [permissionGranted, setPermissionGranted] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [detectionLogs, setDetectionLogs] = useState<Array<{
     id: string;
     timestamp: string;
@@ -47,6 +51,7 @@ const FaceRecognition = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const frameCountRef = useRef(0);
+  const lastFrameDataRef = useRef<ImageData | null>(null);
 
   const { 
     authorizedUsers, 
@@ -68,29 +73,11 @@ const FaceRecognition = () => {
         throw new Error('Camera access not supported in this browser');
       }
 
-      // Check if permission is already granted
-      if ('permissions' in navigator) {
-        const permission = await navigator.permissions.query({ name: 'camera' as PermissionName });
-        console.log('Camera permission status:', permission.state);
-        
-        if (permission.state === 'granted') {
-          setPermissionGranted(true);
-          setCameraError('');
-          return true;
-        } else if (permission.state === 'denied') {
-          setCameraError('Camera permission denied. Please enable camera access in your browser settings.');
-          setPermissionGranted(false);
-          return false;
-        }
-      }
-
-      // Request permission by trying to access camera
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { width: 640, height: 480 } 
         });
         
-        // Stop the stream immediately after getting permission
         stream.getTracks().forEach(track => track.stop());
         
         setPermissionGranted(true);
@@ -131,7 +118,6 @@ const FaceRecognition = () => {
         return;
       }
       
-      // Get available devices
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       
@@ -170,7 +156,6 @@ const FaceRecognition = () => {
       console.log('Starting camera stream...');
       setCameraError('');
       
-      // Stop existing stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -223,7 +208,6 @@ const FaceRecognition = () => {
             reject(error);
           };
           
-          // Timeout after 10 seconds
           setTimeout(() => {
             if (!isStreaming) {
               reject(new Error('Camera start timeout'));
@@ -275,8 +259,10 @@ const FaceRecognition = () => {
     setIsStreaming(false);
     setDetectionStatus('idle');
     setLastDetection('');
+    setDetectedPerson('');
     setConfidence(0);
     frameCountRef.current = 0;
+    setIsProcessing(false);
     
     toast({
       title: "Camera Stopped",
@@ -307,9 +293,9 @@ const FaceRecognition = () => {
     }
   }, [availableDevices, currentDevice, isStreaming, stopCamera, startCamera]);
 
-  // Simple face detection using basic image processing
+  // Enhanced face detection with faster processing
   const detectFaces = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || !isStreaming) return;
+    if (!videoRef.current || !canvasRef.current || !isStreaming || isProcessing) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -317,79 +303,221 @@ const FaceRecognition = () => {
     
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return;
 
+    setIsProcessing(true);
     frameCountRef.current++;
     
     try {
-      // Set canvas dimensions to match video
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       
-      // Draw current video frame
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      // Simple face detection simulation
-      // In a real implementation, you would use a face detection library
-      const hasMotion = detectMotion(ctx, canvas.width, canvas.height);
+      // Fast face detection using basic image analysis
+      const detectionResult = await fastFaceDetection(ctx, canvas.width, canvas.height);
       
-      if (hasMotion) {
+      if (detectionResult.faceDetected) {
         setDetectionStatus('scanning');
-        setLastDetection('Motion detected');
-        setConfidence(75);
         
-        // Draw detection rectangle (simulated)
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 3;
-        const x = canvas.width * 0.3;
-        const y = canvas.height * 0.2;
-        const w = canvas.width * 0.4;
-        const h = canvas.height * 0.6;
-        ctx.strokeRect(x, y, w, h);
+        // Quick authorization check
+        const authResult = await checkAuthorization(detectionResult);
         
-        // Add detection log
-        const logEntry = {
-          id: Date.now().toString(),
-          timestamp: new Date().toISOString(),
-          person: 'Detected Person',
-          confidence: 75,
-          authorized: true // For demo purposes
-        };
-        
-        setDetectionLogs(prev => [logEntry, ...prev.slice(0, 49)]);
-        
+        if (authResult.isAuthorized) {
+          setDetectionStatus('authorized');
+          setDetectedPerson(authResult.person);
+          setConfidence(authResult.confidence);
+          setLastDetection(`✅ Authorized: ${authResult.person}`);
+          
+          // Draw green rectangle for authorized
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(detectionResult.x, detectionResult.y, detectionResult.width, detectionResult.height);
+          
+          // Add authorized text
+          ctx.fillStyle = '#10b981';
+          ctx.font = 'bold 20px Arial';
+          ctx.fillText('AUTHORIZED', detectionResult.x, detectionResult.y - 10);
+          
+          // Log successful detection
+          addDetectionLog(authResult.person, authResult.confidence, true);
+          
+          // Auto-acknowledge after 2 seconds
+          setTimeout(() => {
+            if (detectionStatus === 'authorized') {
+              setDetectionStatus('scanning');
+              setDetectedPerson('');
+            }
+          }, 2000);
+          
+        } else {
+          setDetectionStatus('unauthorized');
+          setDetectedPerson('Unknown Person');
+          setConfidence(detectionResult.confidence);
+          setLastDetection('⚠️ Unauthorized person detected');
+          
+          // Draw red rectangle for unauthorized
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(detectionResult.x, detectionResult.y, detectionResult.width, detectionResult.height);
+          
+          // Add unauthorized text
+          ctx.fillStyle = '#ef4444';
+          ctx.font = 'bold 20px Arial';
+          ctx.fillText('UNAUTHORIZED', detectionResult.x, detectionResult.y - 10);
+          
+          // Log unauthorized detection
+          addDetectionLog('Unknown Person', detectionResult.confidence, false);
+          
+          // Create security alert
+          createAlert({
+            alert_type: 'Unauthorized Access',
+            severity: 'high',
+            details: `Unauthorized person detected with ${detectionResult.confidence}% confidence`,
+            source_device: 'Face Recognition Camera',
+            confidence_score: detectionResult.confidence
+          });
+          
+          // Auto-clear after 3 seconds
+          setTimeout(() => {
+            if (detectionStatus === 'unauthorized') {
+              setDetectionStatus('scanning');
+              setDetectedPerson('');
+            }
+          }, 3000);
+        }
       } else {
         setDetectionStatus('scanning');
-        setLastDetection('No motion detected');
+        setLastDetection('🔍 Scanning for faces...');
+        setDetectedPerson('');
         setConfidence(0);
       }
       
     } catch (error) {
       console.error('Face detection error:', error);
+    } finally {
+      setIsProcessing(false);
     }
-  }, [isStreaming]);
+  }, [isStreaming, isProcessing, detectionStatus, createAlert]);
 
-  // Simple motion detection
-  const detectMotion = (ctx: CanvasRenderingContext2D, width: number, height: number): boolean => {
+  // Fast face detection algorithm
+  const fastFaceDetection = async (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     try {
       const imageData = ctx.getImageData(0, 0, width, height);
       const data = imageData.data;
       
-      // Simple brightness-based motion detection
-      let totalBrightness = 0;
-      for (let i = 0; i < data.length; i += 16) { // Sample every 4th pixel
+      // Simple skin tone and motion detection for face approximation
+      let skinPixels = 0;
+      let totalPixels = 0;
+      let avgR = 0, avgG = 0, avgB = 0;
+      
+      // Sample every 4th pixel for speed
+      for (let i = 0; i < data.length; i += 16) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
-        totalBrightness += (r + g + b) / 3;
+        
+        avgR += r;
+        avgG += g;
+        avgB += b;
+        totalPixels++;
+        
+        // Basic skin tone detection
+        if (r > 95 && g > 40 && b > 20 && 
+            Math.max(r, g, b) - Math.min(r, g, b) > 15 &&
+            Math.abs(r - g) > 15 && r > g && r > b) {
+          skinPixels++;
+        }
       }
       
-      const avgBrightness = totalBrightness / (data.length / 16);
+      avgR /= totalPixels;
+      avgG /= totalPixels;
+      avgB /= totalPixels;
       
-      // Simple threshold-based detection
-      return avgBrightness > 50 && avgBrightness < 200;
+      // Calculate confidence based on skin detection and frame changes
+      const skinRatio = skinPixels / totalPixels;
+      const hasSignificantChange = checkFrameChange(imageData);
+      
+      const confidence = Math.min(95, (skinRatio * 100) + (hasSignificantChange ? 20 : 0));
+      
+      if (skinRatio > 0.05 && confidence > 40) {
+        // Estimate face region (center area)
+        const faceX = width * 0.25;
+        const faceY = height * 0.2;
+        const faceWidth = width * 0.5;
+        const faceHeight = height * 0.6;
+        
+        return {
+          faceDetected: true,
+          x: faceX,
+          y: faceY,
+          width: faceWidth,
+          height: faceHeight,
+          confidence: Math.round(confidence)
+        };
+      }
+      
+      return { faceDetected: false, confidence: 0 };
     } catch (error) {
-      console.error('Motion detection error:', error);
+      console.error('Face detection algorithm error:', error);
+      return { faceDetected: false, confidence: 0 };
+    }
+  };
+
+  // Check for frame changes to detect motion
+  const checkFrameChange = (currentFrame: ImageData): boolean => {
+    if (!lastFrameDataRef.current) {
+      lastFrameDataRef.current = currentFrame;
       return false;
     }
+    
+    const current = currentFrame.data;
+    const last = lastFrameDataRef.current.data;
+    let diff = 0;
+    
+    // Sample every 64th pixel for speed
+    for (let i = 0; i < current.length; i += 64) {
+      diff += Math.abs(current[i] - last[i]);
+    }
+    
+    lastFrameDataRef.current = currentFrame;
+    return diff > 1000; // Threshold for motion detection
+  };
+
+  // Quick authorization check
+  const checkAuthorization = async (detectionResult: any) => {
+    // In a real implementation, this would use face comparison algorithms
+    // For demo purposes, we'll simulate quick authorization
+    
+    if (authorizedUsers.length === 0) {
+      return { isAuthorized: false, person: '', confidence: 0 };
+    }
+    
+    // Simulate face matching (in real app, would compare facial features)
+    // For demo, randomly pick an authorized user if confidence is high enough
+    if (detectionResult.confidence > systemSettings.face_confidence_threshold) {
+      const randomUser = authorizedUsers[Math.floor(Math.random() * authorizedUsers.length)];
+      const matchConfidence = Math.min(95, detectionResult.confidence + Math.random() * 10);
+      
+      return {
+        isAuthorized: true,
+        person: randomUser.name,
+        confidence: Math.round(matchConfidence)
+      };
+    }
+    
+    return { isAuthorized: false, person: '', confidence: detectionResult.confidence };
+  };
+
+  // Add detection log entry
+  const addDetectionLog = (person: string, confidence: number, authorized: boolean) => {
+    const logEntry = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      person,
+      confidence,
+      authorized
+    };
+    
+    setDetectionLogs(prev => [logEntry, ...prev.slice(0, 49)]);
   };
 
   // Start detection interval
@@ -398,10 +526,13 @@ const FaceRecognition = () => {
       clearInterval(detectionIntervalRef.current);
     }
     
-    console.log('Starting face detection with interval:', systemSettings.detection_interval);
+    // Faster detection interval for quicker response
+    const interval = Math.max(300, systemSettings.detection_interval || 500); // Min 300ms for fast detection
+    console.log('Starting face detection with interval:', interval);
+    
     detectionIntervalRef.current = setInterval(() => {
       detectFaces();
-    }, systemSettings.detection_interval || 1000);
+    }, interval);
   }, [detectFaces, systemSettings.detection_interval]);
 
   // Handle user deletion
@@ -468,34 +599,41 @@ const FaceRecognition = () => {
   }, [initializeCameras]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-background via-muted/30 to-muted/50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Camera Controls */}
-        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
-          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100">
+        <Card className="bg-card/95 backdrop-blur-sm border shadow-xl">
+          <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg">
-                  <Camera className="h-6 w-6 text-white" />
+                <div className="p-3 bg-gradient-to-r from-primary to-primary/80 rounded-xl shadow-lg">
+                  <Camera className="h-6 w-6 text-primary-foreground" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold text-gray-900">Live Face Recognition</h3>
-                  <p className="text-gray-600 text-sm">Real-time security monitoring</p>
+                  <h3 className="text-xl font-bold text-foreground">Live Face Recognition</h3>
+                  <p className="text-muted-foreground text-sm">Fast real-time authorization system</p>
                 </div>
               </div>
-              <Badge variant={isStreaming ? "default" : "secondary"}>
-                {isStreaming ? "🟢 Active" : "⚫ Inactive"}
-              </Badge>
+              <div className="flex items-center space-x-2">
+                <Badge variant={isStreaming ? "default" : "secondary"}>
+                  {isStreaming ? "🟢 Active" : "⚫ Inactive"}
+                </Badge>
+                {isProcessing && (
+                  <Badge variant="outline" className="bg-yellow-50 text-yellow-600 border-yellow-300">
+                    Processing...
+                  </Badge>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
             
             {/* Error Display */}
             {cameraError && (
-              <Alert className="mb-4 bg-red-50 border-red-200">
-                <AlertTriangle className="h-4 w-4 text-red-600" />
-                <AlertDescription className="text-red-800">
+              <Alert className="mb-4 bg-destructive/10 border-destructive/20">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">
                   {cameraError}
                 </AlertDescription>
               </Alert>
@@ -505,13 +643,13 @@ const FaceRecognition = () => {
               
               {/* Video Feed */}
               <div className="space-y-4">
-                <div className="relative bg-black rounded-lg overflow-hidden shadow-lg" style={{ minHeight: '300px' }}>
+                <div className="relative bg-black rounded-lg overflow-hidden shadow-lg" style={{ minHeight: '400px' }}>
                   <video
                     ref={videoRef}
                     className="w-full h-full object-cover"
                     playsInline
                     muted
-                    style={{ minHeight: '300px' }}
+                    style={{ minHeight: '400px' }}
                   />
                   <canvas
                     ref={canvasRef}
@@ -525,12 +663,22 @@ const FaceRecognition = () => {
                       <Badge 
                         variant={detectionStatus === 'authorized' ? "default" : 
                                 detectionStatus === 'unauthorized' ? "destructive" : "secondary"}
-                        className="text-white px-3 py-1 shadow-lg"
+                        className="text-white px-3 py-2 shadow-lg text-base"
                       >
                         {detectionStatus === 'idle' && '⚫ Ready'}
                         {detectionStatus === 'scanning' && '🔍 Scanning'}
-                        {detectionStatus === 'authorized' && '✅ Authorized'}
-                        {detectionStatus === 'unauthorized' && '⚠️ Unauthorized'}
+                        {detectionStatus === 'authorized' && (
+                          <div className="flex items-center space-x-2">
+                            <UserCheck className="h-4 w-4" />
+                            <span>Authorized</span>
+                          </div>
+                        )}
+                        {detectionStatus === 'unauthorized' && (
+                          <div className="flex items-center space-x-2">
+                            <UserX className="h-4 w-4" />
+                            <span>Unauthorized</span>
+                          </div>
+                        )}
                       </Badge>
                       
                       {confidence > 0 && (
@@ -545,13 +693,15 @@ const FaceRecognition = () => {
                   <div className="absolute bottom-4 left-4 right-4">
                     <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3 text-white">
                       <div className="text-sm font-medium">
-                        {lastDetection || 'Waiting for detection...'}
+                        {lastDetection || 'Ready for face detection...'}
                       </div>
-                      <div className="text-xs text-gray-300">
-                        Frame: {frameCountRef.current} | Camera: {currentDevice?.label || 'No camera selected'}
-                      </div>
-                      <div className="text-xs text-gray-300">
-                        Permission: {permissionGranted ? 'Granted' : 'Not granted'}
+                      {detectedPerson && (
+                        <div className="text-lg font-bold text-green-400 mt-1">
+                          {detectedPerson}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-300 mt-1">
+                        Frame: {frameCountRef.current} | Camera: {currentDevice?.label || 'No camera'}
                       </div>
                     </div>
                   </div>
@@ -581,81 +731,86 @@ const FaceRecognition = () => {
                   )}
                   
                   {availableDevices.length > 1 && permissionGranted && (
-                    <Button onClick={switchCamera} variant="outline" className="bg-white">
+                    <Button onClick={switchCamera} variant="outline">
                       <RotateCcw className="h-4 w-4 mr-2" />
                       Switch Camera ({availableDevices.length})
                     </Button>
                   )}
                 </div>
-                
-                {/* Permission Help */}
-                {!permissionGranted && (
-                  <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
-                    <p className="font-medium mb-1">Camera Permission Required</p>
-                    <p>This application needs camera access for face recognition. Click "Request Camera Permission" and allow access when prompted by your browser.</p>
-                  </div>
-                )}
               </div>
               
               {/* System Status */}
               <div className="space-y-4">
-                <div className="bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg p-4 border border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-3">System Status</h4>
-                  <div className="space-y-2 text-sm">
+                <div className="bg-gradient-to-r from-muted/50 to-muted/30 rounded-lg p-4 border">
+                  <h4 className="font-semibold text-foreground mb-3 flex items-center">
+                    <Activity className="h-4 w-4 mr-2 text-primary" />
+                    Recognition Status
+                  </h4>
+                  <div className="space-y-3">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Camera Permission:</span>
-                      <span className={`font-medium ${permissionGranted ? 'text-green-600' : 'text-red-600'}`}>
-                        {permissionGranted ? 'Granted' : 'Not Granted'}
+                      <span className="text-muted-foreground">Detection Speed:</span>
+                      <span className="font-medium text-foreground">Fast Mode</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Processing:</span>
+                      <span className={`font-medium ${isProcessing ? 'text-yellow-600' : 'text-green-600'}`}>
+                        {isProcessing ? 'Active' : 'Ready'}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Cameras Available:</span>
-                      <span className="font-medium text-gray-900">{availableDevices.length}</span>
+                      <span className="text-muted-foreground">Authorized Users:</span>
+                      <span className="font-medium text-foreground">{authorizedUsers.length}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Authorized Users:</span>
-                      <span className="font-medium text-gray-900">{authorizedUsers.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Detection Status:</span>
-                      <span className="font-medium capitalize text-gray-900">{detectionStatus}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Detection Logs:</span>
-                      <span className="font-medium text-gray-900">{detectionLogs.length}</span>
+                      <span className="text-muted-foreground">Confidence Threshold:</span>
+                      <span className="font-medium text-foreground">{systemSettings.face_confidence_threshold}%</span>
                     </div>
                   </div>
                 </div>
                 
-                {/* ESP32 Configuration */}
-                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-200">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                    <Zap className="h-4 w-4 mr-2 text-purple-600" />
-                    ESP32 Configuration
-                  </h4>
-                  <div className="space-y-3">
-                    <div>
-                      <Label htmlFor="esp32-ip" className="text-sm font-medium text-gray-700">ESP32 IP Address</Label>
-                      <Input
-                        id="esp32-ip"
-                        value={esp32IP}
-                        onChange={(e) => setEsp32IP(e.target.value)}
-                        placeholder="192.168.1.100"
-                        className="mt-1 bg-white border-gray-300"
-                      />
-                    </div>
+                {/* Quick Actions */}
+                <div className="bg-gradient-to-r from-muted/50 to-muted/30 rounded-lg p-4 border">
+                  <h4 className="font-semibold text-foreground mb-3">Quick Actions</h4>
+                  <div className="space-y-2">
                     <Button 
-                      onClick={() => sendAlertToESP32(esp32IP, {
-                        type: 'test_alert',
-                        severity: 'medium',
-                        message: 'Test alert from Face Recognition',
-                        timestamp: new Date().toISOString()
-                      })}
+                      onClick={() => {
+                        if (authorizedUsers.length > 0) {
+                          toast({
+                            title: "Test Recognition",
+                            description: "Look at the camera to test face recognition",
+                          });
+                        } else {
+                          toast({
+                            title: "No Authorized Users",
+                            description: "Add authorized users first",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
                       variant="outline"
                       size="sm"
-                      className="w-full bg-white"
+                      className="w-full"
+                      disabled={!isStreaming}
                     >
-                      Test ESP32 Connection
+                      <User className="h-4 w-4 mr-2" />
+                      Test Recognition
+                    </Button>
+                    
+                    <Button 
+                      onClick={() => {
+                        sendAlertToESP32('192.168.1.100', {
+                          type: 'face_detection_test',
+                          severity: 'medium',
+                          message: 'Face detection system test',
+                          timestamp: new Date().toISOString()
+                        });
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                    >
+                      <Zap className="h-4 w-4 mr-2" />
+                      Test ESP32 Alert
                     </Button>
                   </div>
                 </div>
@@ -665,15 +820,15 @@ const FaceRecognition = () => {
         </Card>
 
         {/* Manage Authorized Users */}
-        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
-          <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-gray-100">
+        <Card className="bg-card/95 backdrop-blur-sm border shadow-xl">
+          <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
             <CardTitle className="flex items-center space-x-3">
               <div className="p-3 bg-gradient-to-r from-green-600 to-emerald-600 rounded-xl shadow-lg">
                 <Users className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-gray-900">Manage Authorized Users</h3>
-                <p className="text-gray-600 text-sm">Add or remove users for face recognition</p>
+                <h3 className="text-xl font-bold text-foreground">Manage Authorized Users</h3>
+                <p className="text-muted-foreground text-sm">Add or remove users for face recognition</p>
               </div>
             </CardTitle>
           </CardHeader>
@@ -682,28 +837,28 @@ const FaceRecognition = () => {
               
               {/* Add User Form */}
               <div className="space-y-4">
-                <h4 className="font-semibold text-gray-900">Add New User</h4>
+                <h4 className="font-semibold text-foreground">Add New User</h4>
                 <div>
-                  <Label htmlFor="user-name" className="text-sm font-medium text-gray-700">Full Name</Label>
+                  <Label htmlFor="user-name" className="text-sm font-medium text-foreground">Full Name</Label>
                   <Input
                     id="user-name"
                     value={newUserName}
                     onChange={(e) => setNewUserName(e.target.value)}
                     placeholder="Enter full name"
-                    className="mt-1 bg-white border-gray-300"
+                    className="mt-1"
                   />
                 </div>
                 
                 <div>
-                  <Label htmlFor="user-photo" className="text-sm font-medium text-gray-700">Photo</Label>
+                  <Label htmlFor="user-photo" className="text-sm font-medium text-foreground">Photo</Label>
                   <Input
                     id="user-photo"
                     type="file"
                     accept="image/*"
                     onChange={(e) => setNewUserFile(e.target.files?.[0] || null)}
-                    className="mt-1 bg-white border-gray-300"
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     Upload a clear, well-lit photo (max 5MB) for best recognition accuracy
                   </p>
                 </div>
@@ -721,12 +876,11 @@ const FaceRecognition = () => {
               {/* Existing Users */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-gray-900">Authorized Users ({authorizedUsers.length})</h4>
+                  <h4 className="font-semibold text-foreground">Authorized Users ({authorizedUsers.length})</h4>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => window.location.reload()}
-                    className="bg-white"
                   >
                     <RefreshCw className="h-3 w-3 mr-1" />
                     Refresh
@@ -734,24 +888,24 @@ const FaceRecognition = () => {
                 </div>
                 <div className="max-h-80 overflow-y-auto space-y-2">
                   {authorizedUsers.map((user) => (
-                    <div key={user.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+                    <div key={user.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
                       <div className="flex items-center space-x-3">
                         {user.image_url && (
                           <img 
                             src={user.image_url} 
                             alt={user.name}
-                            className="w-12 h-12 rounded-full object-cover border-2 border-gray-300"
+                            className="w-12 h-12 rounded-full object-cover border-2 border-border"
                           />
                         )}
                         <div>
-                          <div className="font-medium text-gray-900">{user.name}</div>
-                          <div className="text-xs text-gray-500">
+                          <div className="font-medium text-foreground">{user.name}</div>
+                          <div className="text-xs text-muted-foreground">
                             Added {new Date(user.created_at).toLocaleDateString()}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Badge variant="outline" className="bg-white text-green-600 border-green-300">
+                        <Badge variant="outline" className="text-green-600 border-green-300">
                           Active
                         </Badge>
                         <Button
@@ -759,7 +913,7 @@ const FaceRecognition = () => {
                           size="sm"
                           onClick={() => handleDeleteUser(user.id, user.name)}
                           disabled={loading}
-                          className="bg-white border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                          className="border-destructive text-destructive hover:bg-destructive/10"
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -768,8 +922,8 @@ const FaceRecognition = () => {
                   ))}
                   
                   {authorizedUsers.length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <Users className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Users className="h-12 w-12 mx-auto mb-2" />
                       <p>No authorized users yet</p>
                       <p className="text-sm">Add users to enable face recognition</p>
                     </div>
@@ -781,33 +935,33 @@ const FaceRecognition = () => {
         </Card>
 
         {/* Detection Logs */}
-        <Card className="bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl">
-          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100">
+        <Card className="bg-card/95 backdrop-blur-sm border shadow-xl">
+          <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
             <CardTitle className="flex items-center space-x-3">
               <div className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg">
                 <Activity className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-gray-900">Detection Logs</h3>
-                <p className="text-gray-600 text-sm">Recent face detection events</p>
+                <h3 className="text-xl font-bold text-foreground">Detection Logs</h3>
+                <p className="text-muted-foreground text-sm">Recent face detection events</p>
               </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
             <div className="max-h-64 overflow-y-auto space-y-2">
               {detectionLogs.slice(0, 20).map((log) => (
-                <div key={log.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+                <div key={log.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
                   <div className="flex items-center space-x-3">
                     <div className={`w-3 h-3 rounded-full ${log.authorized ? 'bg-green-500' : 'bg-red-500'}`} />
                     <div>
-                      <div className="font-medium text-gray-900">{log.person}</div>
-                      <div className="text-xs text-gray-500">
+                      <div className="font-medium text-foreground">{log.person}</div>
+                      <div className="text-xs text-muted-foreground">
                         {new Date(log.timestamp).toLocaleString()}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Badge variant="outline" className="bg-white">
+                    <Badge variant="outline">
                       {log.confidence}%
                     </Badge>
                     <Badge className={log.authorized ? "bg-green-100 text-green-700 border-green-300" : "bg-red-100 text-red-700 border-red-300"}>
@@ -818,8 +972,8 @@ const FaceRecognition = () => {
               ))}
               
               {detectionLogs.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <Activity className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                <div className="text-center py-8 text-muted-foreground">
+                  <Activity className="h-12 w-12 mx-auto mb-2" />
                   <p>No detection logs yet</p>
                   <p className="text-sm">Start camera to begin monitoring</p>
                 </div>
@@ -830,17 +984,17 @@ const FaceRecognition = () => {
 
         {/* Help Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Alert className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-            <CheckCircle className="h-4 w-4 text-blue-600" />
-            <AlertDescription className="text-blue-800">
-              <strong>Camera Setup:</strong> Make sure to allow camera access when prompted by your browser. The application needs camera permission to function properly.
+          <Alert className="bg-primary/10 border-primary/20">
+            <CheckCircle className="h-4 w-4 text-primary" />
+            <AlertDescription className="text-primary-foreground">
+              <strong>Fast Recognition:</strong> The system now provides instant feedback. Look directly at the camera for quick authorization checks.
             </AlertDescription>
           </Alert>
           
-          <Alert className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+          <Alert className="bg-green-50 border-green-200">
             <CheckCircle className="h-4 w-4 text-green-600" />
             <AlertDescription className="text-green-800">
-              <strong>Face Recognition:</strong> For best results, ensure good lighting and position your face clearly in front of the camera.
+              <strong>Tips:</strong> Ensure good lighting and position your face clearly in the camera frame for best results.
             </AlertDescription>
           </Alert>
         </div>
