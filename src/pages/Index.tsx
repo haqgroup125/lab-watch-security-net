@@ -32,38 +32,6 @@ const Index = () => {
     fetchESP32Devices,
   } = useSecuritySystem();
 
-  // Helper functions to match expected interface
-  const addUser = (name: string, imageFile: File) => {
-    return addAuthorizedUser(name, imageFile);
-  };
-
-  const deleteUser = (userId: string, userName: string) => {
-    return deleteAuthorizedUser(userId, userName);
-  };
-
-  const sendAlert = (deviceIp: string, alertData: any) => {
-    return sendAlertToESP32(deviceIp, alertData);
-  };
-
-  const connectESP32 = async (deviceData: any) => {
-    // Implementation for connecting ESP32
-    console.log('Connecting to ESP32:', deviceData);
-    await testAllESP32Devices();
-  };
-
-  const triggerAlert = (message: string, severity: 'low' | 'medium' | 'high') => {
-    return createAlert({
-      alert_type: 'Manual Alert',
-      severity,
-      details: message,
-      source_device: 'Dashboard'
-    });
-  };
-
-  const clearAlert = (alertId: string) => {
-    return acknowledgeAlert(alertId);
-  };
-
   // Calculate ESP32 status from devices
   const esp32Status = {
     connected: esp32Devices.some(device => device.status === 'online'),
@@ -89,7 +57,12 @@ const Index = () => {
         setActiveTab('face-recognition');
         break;
       case 'test-alert':
-        triggerAlert('Test alert from dashboard', 'medium');
+        createAlert({
+          alert_type: 'Test Alert',
+          severity: 'medium',
+          details: 'Test alert from dashboard',
+          source_device: 'Dashboard'
+        });
         break;
       case 'esp32-control':
         setActiveTab('esp32-control');
@@ -127,7 +100,7 @@ const Index = () => {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 bg-muted/50">
+          <TabsList className="grid w-full grid-cols-5 bg-muted/50">
             <TabsTrigger 
               value="dashboard" 
               className="flex items-center space-x-2 data-[state=active]:bg-background"
@@ -179,26 +152,15 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="face-recognition" className="space-y-6">
-            <FaceRecognition 
-              authorizedUsers={authorizedUsers}
-              onAddUser={addUser}
-              onDeleteUser={deleteUser}
-            />
+            <FaceRecognition />
           </TabsContent>
 
           <TabsContent value="alerts" className="space-y-6">
-            <AlertMonitor 
-              alerts={alerts}
-              onClearAlert={clearAlert}
-            />
+            <AlertMonitor />
           </TabsContent>
 
           <TabsContent value="esp32-control" className="space-y-6">
-            <ESP32Manager 
-              esp32Status={esp32Status}
-              onConnect={connectESP32}
-              onSendAlert={sendAlert}
-            />
+            <ESP32Manager />
           </TabsContent>
 
           <TabsContent value="settings" className="space-y-6">
