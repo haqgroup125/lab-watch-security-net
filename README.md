@@ -306,11 +306,12 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 📞 Support
 
-- 📧 **Email:** support@example.com
-- 💬 **Discord:** [Join our community](#)
+- 📧 **Email:** abubakkar996610@gmail.com
+- 💬 **Discord:** still no account but i will upload it soon as posible
 - 📖 **Documentation:** [Full docs](#)
 - 🐛 **Issues:** [GitHub Issues](#)
 
 ---
 
-**🔒 Professional Security System v2.0** - Built with ❤️ for modern security needs
+**🔒 Professional Security System v2.0** - 
+                               .....MADE BY M.ABUBAKKAR....
