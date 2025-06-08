@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Camera, Upload, User, UserCheck, UserX, Loader2, AlertCircle, CheckCircle, Trash2, Eye, EyeOff, Shield, ShieldAlert, RefreshCw } from 'lucide-react';
+import { Camera, Upload, User, UserCheck, UserX, Loader2, AlertCircle, CheckCircle, Trash2, Eye, EyeOff, Shield, ShieldAlert, RefreshCw, Scan } from 'lucide-react';
 import { useSecuritySystem } from '@/hooks/useSecuritySystem';
 import { toast } from "@/hooks/use-toast";
 
@@ -16,17 +17,19 @@ const FaceRecognition: React.FC = () => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [registrationProgress, setRegistrationProgress] = useState(0);
-  const [detectionStatus, setDetectionStatus] = useState<'idle' | 'detecting' | 'authorized' | 'unauthorized'>('idle');
-  const [lastDetection, setLastDetection] = useState<{ name: string; confidence: number; isAuthorized: boolean } | null>(null);
+  const [detectionStatus, setDetectionStatus] = useState<'idle' | 'scanning' | 'analyzing' | 'authorized' | 'unauthorized'>('idle');
+  const [lastDetection, setLastDetection] = useState<{ name: string; confidence: number; isAuthorized: boolean; timestamp: Date } | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [detectionCount, setDetectionCount] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied' | 'prompt'>('checking');
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [scanningProgress, setScanningProgress] = useState(0);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const scanningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { 
     authorizedUsers, 
@@ -37,149 +40,68 @@ const FaceRecognition: React.FC = () => {
     fetchAuthorizedUsers 
   } = useSecuritySystem();
 
-  // Check camera permissions
-  const checkCameraPermissions = useCallback(async () => {
+  // Initialize camera with improved error handling
+  const initializeCamera = useCallback(async () => {
+    if (isInitializing) return;
+    
     try {
-      console.log('Checking camera permissions...');
-      setPermissionStatus('checking');
-      
+      setIsInitializing(true);
+      setCameraError(null);
+      console.log('Starting camera initialization...');
+
       // Check if getUserMedia is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera not supported in this browser');
+        throw new Error('Camera not supported in this browser. Please use Chrome, Firefox, or Safari.');
       }
 
-      // Try to get permission status
-      if ('permissions' in navigator) {
-        const permission = await navigator.permissions.query({ name: 'camera' as PermissionName });
-        console.log('Camera permission status:', permission.state);
-        
-        if (permission.state === 'denied') {
-          setPermissionStatus('denied');
-          setCameraError('Camera access denied. Please enable camera permissions in your browser settings.');
-          return false;
-        } else if (permission.state === 'granted') {
-          setPermissionStatus('granted');
-          return true;
+      // Request camera permission with optimized constraints
+      const constraints = {
+        video: {
+          width: { min: 640, ideal: 1280 },
+          height: { min: 480, ideal: 720 },
+          facingMode: 'user',
+          frameRate: { ideal: 30 }
         }
-      }
+      };
+
+      console.log('Requesting camera access...');
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      setPermissionStatus('prompt');
-      return true;
-    } catch (error) {
-      console.error('Permission check failed:', error);
-      setPermissionStatus('prompt');
-      return true; // Continue to try getUserMedia
-    }
-  }, []);
-
-  // Initialize camera with better error handling and fallbacks
-  const initializeCamera = useCallback(async () => {
-    try {
-      console.log('Initializing camera...');
-      setCameraError(null);
-      
-      // Check permissions first
-      const permissionOk = await checkCameraPermissions();
-      if (!permissionOk) return;
-
-      // Try different constraint configurations
-      const constraintOptions = [
-        // High quality (preferred)
-        {
-          video: {
-            width: { min: 640, ideal: 1280, max: 1920 },
-            height: { min: 480, ideal: 720, max: 1080 },
-            facingMode: { ideal: 'user' },
-            frameRate: { ideal: 30, max: 60 }
-          }
-        },
-        // Medium quality fallback
-        {
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user',
-            frameRate: { ideal: 30 }
-          }
-        },
-        // Basic fallback
-        {
-          video: {
-            facingMode: 'user'
-          }
-        },
-        // Any camera fallback
-        {
-          video: true
-        }
-      ];
-
-      let stream = null;
-      let lastError = null;
-
-      for (const constraints of constraintOptions) {
-        try {
-          console.log('Trying constraints:', constraints);
-          stream = await navigator.mediaDevices.getUserMedia(constraints);
-          console.log('Camera stream obtained with constraints:', constraints);
-          break;
-        } catch (error) {
-          console.log('Failed with constraints:', constraints, 'Error:', error);
-          lastError = error;
-        }
-      }
-
-      if (!stream) {
-        throw lastError || new Error('Failed to access camera with any configuration');
-      }
-
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         streamRef.current = stream;
         
-        // Wait for video to be ready
+        // Wait for video to load
         await new Promise((resolve, reject) => {
           if (videoRef.current) {
             videoRef.current.onloadedmetadata = () => {
-              console.log('Video metadata loaded, dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
+              console.log('Camera ready:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
               resolve(true);
             };
-            videoRef.current.onerror = (error) => {
-              console.error('Video error:', error);
-              reject(error);
-            };
-            // Timeout after 10 seconds
-            setTimeout(() => reject(new Error('Video loading timeout')), 10000);
-          } else {
-            reject(new Error('Video element not available'));
+            videoRef.current.onerror = reject;
+            setTimeout(() => reject(new Error('Camera loading timeout')), 5000);
           }
         });
         
         setIsActive(true);
         setDetectionCount(0);
-        setPermissionStatus('granted');
-        setCameraError(null);
         
         toast({
-          title: "Camera Activated",
-          description: "Face recognition system is now monitoring",
+          title: "🎥 Camera Activated",
+          description: "Face recognition system is now active and monitoring",
         });
       }
     } catch (error) {
       console.error('Camera initialization failed:', error);
-      setPermissionStatus('denied');
       
-      let errorMessage = "Failed to access camera. ";
-      
+      let errorMessage = "Camera access failed. ";
       if (error instanceof Error) {
         if (error.name === 'NotFoundError') {
-          errorMessage += "No camera found. Please connect a camera and try again.";
+          errorMessage += "No camera detected. Please connect a camera.";
         } else if (error.name === 'NotAllowedError') {
-          errorMessage += "Camera access denied. Please allow camera permissions and try again.";
+          errorMessage += "Please allow camera access and try again.";
         } else if (error.name === 'NotReadableError') {
-          errorMessage += "Camera is already in use by another application.";
-        } else if (error.name === 'OverconstrainedError') {
-          errorMessage += "Camera doesn't support the required settings.";
+          errorMessage += "Camera is being used by another app.";
         } else {
           errorMessage += error.message;
         }
@@ -187,35 +109,38 @@ const FaceRecognition: React.FC = () => {
       
       setCameraError(errorMessage);
       toast({
-        title: "Camera Error",
+        title: "❌ Camera Error",
         description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsInitializing(false);
     }
-  }, [checkCameraPermissions]);
+  }, [isInitializing]);
 
   // Stop camera
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => {
-        track.stop();
-        console.log('Stopped camera track:', track.kind);
-      });
+      streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current);
       detectionIntervalRef.current = null;
     }
+    if (scanningTimeoutRef.current) {
+      clearTimeout(scanningTimeoutRef.current);
+      scanningTimeoutRef.current = null;
+    }
     setIsActive(false);
     setDetectionStatus('idle');
     setLastDetection(null);
     setDetectionCount(0);
-    setCameraError(null);
+    setScanningProgress(0);
     console.log('Camera stopped');
   }, []);
 
-  // Improved face detection simulation with proper unauthorized detection
+  // Enhanced face detection with more realistic behavior
   const detectFace = useCallback(() => {
     if (!videoRef.current || !canvasRef.current || !isActive) return;
 
@@ -225,82 +150,98 @@ const FaceRecognition: React.FC = () => {
     
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return;
 
-    // Set canvas size to match video
+    // Set canvas size and capture frame
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    
-    // Draw current frame
     ctx.drawImage(video, 0, 0);
     
-    setDetectionStatus('detecting');
+    setDetectionStatus('scanning');
+    setScanningProgress(0);
     
-    // More realistic detection simulation
-    setTimeout(() => {
-      const users = authorizedUsers;
-      setDetectionCount(prev => prev + 1);
-      
-      // Simulate face detection - 80% chance of detecting a face
-      if (Math.random() > 0.2) {
-        // When a face is detected, determine if it's authorized or not
-        // 40% chance it's an authorized user, 60% chance it's unauthorized
-        const isAuthorizedDetection = Math.random() < 0.4 && users.length > 0;
-        
-        if (isAuthorizedDetection && users.length > 0) {
-          // Select a random authorized user
-          const randomUser = users[Math.floor(Math.random() * users.length)];
-          const confidence = 0.82 + Math.random() * 0.15; // 82-97% confidence for authorized
-          
-          setDetectionStatus('authorized');
-          setLastDetection({ 
-            name: randomUser.name, 
-            confidence, 
-            isAuthorized: true 
-          });
-          
-          toast({
-            title: "✅ Access Granted",
-            description: `Welcome back, ${randomUser.name}! (${(confidence * 100).toFixed(1)}% match)`,
-          });
-        } else {
-          // Unauthorized person detected
-          const confidence = 0.25 + Math.random() * 0.35; // 25-60% confidence for unauthorized
-          
-          setDetectionStatus('unauthorized');
-          setLastDetection({ 
-            name: 'Unknown Person', 
-            confidence, 
-            isAuthorized: false 
-          });
-          
-          // Create security alert
-          createAlert({
-            alert_type: 'Unauthorized Access Attempt',
-            severity: 'high',
-            details: `Unauthorized person detected with ${(confidence * 100).toFixed(1)}% confidence`,
-            source_device: 'Face Recognition Camera',
-            confidence_score: Math.round(confidence * 100)
-          });
-          
-          toast({
-            title: "🚨 Access Denied",
-            description: `Unauthorized person detected! Security alert created.`,
-            variant: "destructive",
-          });
+    // Simulate progressive scanning
+    const progressInterval = setInterval(() => {
+      setScanningProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(progressInterval);
+          return 100;
         }
-      } else {
-        // No face detected
-        setDetectionStatus('idle');
-        setLastDetection(null);
-      }
-    }, 1000); // 1 second detection delay for realism
+        return prev + 25;
+      });
+    }, 200);
+
+    scanningTimeoutRef.current = setTimeout(() => {
+      clearInterval(progressInterval);
+      setDetectionStatus('analyzing');
+      
+      setTimeout(() => {
+        const users = authorizedUsers;
+        setDetectionCount(prev => prev + 1);
+        
+        // 85% chance of detecting a face (more realistic)
+        if (Math.random() > 0.15) {
+          // When face is detected, determine authorization
+          // 30% chance authorized if users exist, 70% unauthorized
+          const isAuthorizedDetection = Math.random() < 0.3 && users.length > 0;
+          
+          if (isAuthorizedDetection && users.length > 0) {
+            // Authorized user detected
+            const randomUser = users[Math.floor(Math.random() * users.length)];
+            const confidence = 0.85 + Math.random() * 0.13; // 85-98% confidence
+            
+            setDetectionStatus('authorized');
+            setLastDetection({ 
+              name: randomUser.name, 
+              confidence, 
+              isAuthorized: true,
+              timestamp: new Date()
+            });
+            
+            toast({
+              title: "✅ Access Granted",
+              description: `Welcome ${randomUser.name}! (${(confidence * 100).toFixed(1)}% match)`,
+            });
+          } else {
+            // Unauthorized person detected
+            const confidence = 0.20 + Math.random() * 0.45; // 20-65% confidence
+            
+            setDetectionStatus('unauthorized');
+            setLastDetection({ 
+              name: 'Unknown Individual', 
+              confidence, 
+              isAuthorized: false,
+              timestamp: new Date()
+            });
+            
+            // Create security alert
+            createAlert({
+              alert_type: 'Unauthorized Access Attempt',
+              severity: 'high',
+              details: `Unauthorized person detected at ${new Date().toLocaleTimeString()}. Confidence: ${(confidence * 100).toFixed(1)}%`,
+              source_device: 'Face Recognition System',
+              confidence_score: Math.round(confidence * 100)
+            });
+            
+            toast({
+              title: "🚨 Security Alert",
+              description: "Unauthorized person detected! Alert created.",
+              variant: "destructive",
+            });
+          }
+        } else {
+          // No face detected
+          setDetectionStatus('idle');
+          setLastDetection(null);
+        }
+        setScanningProgress(0);
+      }, 800); // Analysis time
+    }, 1000); // Scanning time
   }, [authorizedUsers, isActive, createAlert]);
 
-  // Start continuous detection
+  // Start detection loop
   useEffect(() => {
     if (isActive && !detectionIntervalRef.current) {
-      // Start detection immediately, then every 4 seconds
-      detectFace();
-      detectionIntervalRef.current = setInterval(detectFace, 4000);
+      detectFace(); // Initial scan
+      detectionIntervalRef.current = setInterval(detectFace, 5000); // Every 5 seconds
     }
     
     return () => {
@@ -311,7 +252,7 @@ const FaceRecognition: React.FC = () => {
     };
   }, [isActive, detectFace]);
 
-  // Capture photo for registration
+  // Enhanced photo capture for registration
   const capturePhoto = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current || !newUserName.trim()) {
       toast({
@@ -330,31 +271,35 @@ const FaceRecognition: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas context not available');
 
-      // Capture current frame
+      // Capture frame
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
       ctx.drawImage(videoRef.current, 0, 0);
 
-      // Simulate processing steps
-      const steps = ['Capturing image...', 'Analyzing face...', 'Encoding features...', 'Saving to database...'];
+      // Simulate advanced processing
+      const steps = [
+        'Capturing high-resolution image...',
+        'Detecting facial features...',
+        'Extracting biometric data...',
+        'Encoding facial template...',
+        'Saving to secure database...'
+      ];
+      
       for (let i = 0; i < steps.length; i++) {
-        setRegistrationProgress((i + 1) * 25);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        setRegistrationProgress((i + 1) * 20);
+        await new Promise(resolve => setTimeout(resolve, 600));
       }
 
-      // Convert to blob
+      // Create file
       const blob = await new Promise<Blob>((resolve) => {
         canvas.toBlob((blob) => {
           if (blob) resolve(blob);
-        }, 'image/jpeg', 0.9);
+        }, 'image/jpeg', 0.95);
       });
 
       if (!blob) throw new Error('Failed to capture image');
 
-      // Create file from blob
-      const file = new File([blob], `${newUserName.trim()}_face.jpg`, { type: 'image/jpeg' });
-
-      // Register user
+      const file = new File([blob], `${newUserName.trim()}_biometric.jpg`, { type: 'image/jpeg' });
       await addAuthorizedUser(newUserName.trim(), file);
       
       setNewUserName('');
@@ -362,7 +307,7 @@ const FaceRecognition: React.FC = () => {
       
       toast({
         title: "✅ Registration Complete",
-        description: `${newUserName.trim()} has been successfully added to the authorized users list`,
+        description: `${newUserName.trim()} successfully enrolled in the system`,
       });
 
     } catch (error) {
@@ -377,13 +322,13 @@ const FaceRecognition: React.FC = () => {
     }
   }, [newUserName, addAuthorizedUser]);
 
-  // Handle user deletion
+  // Delete user handler
   const handleDeleteUser = async (userId: string, userName: string) => {
     try {
       await deleteAuthorizedUser(userId, userName);
       toast({
         title: "User Removed",
-        description: `${userName} has been removed from authorized users`,
+        description: `${userName} has been removed from the system`,
       });
     } catch (error) {
       toast({
@@ -394,25 +339,23 @@ const FaceRecognition: React.FC = () => {
     }
   };
 
-  // Cleanup on unmount
+  // Cleanup
   useEffect(() => {
-    return () => {
-      stopCamera();
-    };
+    return () => stopCamera();
   }, [stopCamera]);
 
   return (
-    <div className="space-y-4 sm:space-y-6 px-2 sm:px-0">
+    <div className="space-y-6 px-2 sm:px-0">
       {/* Header */}
       <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Face Recognition Security</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">Advanced facial authentication system</p>
+          <h1 className="text-3xl font-bold text-foreground">Face Recognition Security</h1>
+          <p className="text-muted-foreground">Advanced biometric authentication system</p>
         </div>
         <div className="flex items-center justify-center sm:justify-end gap-3">
           <Badge variant={isActive ? 'default' : 'secondary'} className="flex items-center gap-2 px-3 py-1">
             <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
-            <span className="font-medium">{isActive ? 'Monitoring' : 'Inactive'}</span>
+            <span className="font-medium">{isActive ? 'Active' : 'Offline'}</span>
           </Badge>
           {isActive && (
             <Badge variant="outline" className="text-xs">
@@ -422,23 +365,21 @@ const FaceRecognition: React.FC = () => {
         </div>
       </div>
 
-      {/* Camera Permission Alert */}
+      {/* Error Alert */}
       {cameraError && (
         <Alert className="border-red-400 bg-red-50 dark:bg-red-950">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="font-medium">
+          <AlertDescription>
             <div className="flex items-center justify-between">
               <span className="text-red-700 dark:text-red-300">{cameraError}</span>
               <Button 
-                onClick={() => {
-                  setCameraError(null);
-                  initializeCamera();
-                }}
+                onClick={initializeCamera}
                 variant="outline" 
                 size="sm"
                 className="ml-2"
+                disabled={isInitializing}
               >
-                <RefreshCw className="h-4 w-4 mr-1" />
+                <RefreshCw className={`h-4 w-4 mr-1 ${isInitializing ? 'animate-spin' : ''}`} />
                 Retry
               </Button>
             </div>
@@ -446,59 +387,58 @@ const FaceRecognition: React.FC = () => {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Camera Section - Takes up 2 columns on desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Camera Section */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
+            <CardTitle className="flex items-center gap-2">
               <Camera className="h-5 w-5" />
-              Live Security Feed
+              Security Camera Feed
             </CardTitle>
-            <CardDescription className="text-sm">
-              Real-time face detection and authentication
+            <CardDescription>
+              Real-time facial recognition and access control
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Camera Controls */}
+            {/* Controls */}
             <div className="flex flex-wrap gap-2">
               <Button 
                 onClick={isActive ? stopCamera : initializeCamera}
                 variant={isActive ? 'destructive' : 'default'}
-                size="sm"
+                disabled={isInitializing}
                 className="flex-1 sm:flex-none"
-                disabled={permissionStatus === 'checking'}
               >
-                {permissionStatus === 'checking' ? (
+                {isInitializing ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Checking...
+                    Initializing...
                   </>
                 ) : isActive ? (
                   <>
                     <ShieldAlert className="h-4 w-4 mr-2" />
-                    Stop Monitoring
+                    Stop Security
                   </>
                 ) : (
                   <>
                     <Shield className="h-4 w-4 mr-2" />
-                    Start Monitoring
+                    Start Security
                   </>
                 )}
               </Button>
               <Button 
                 onClick={() => setShowPreview(!showPreview)}
                 variant="outline"
-                size="sm"
+                size="default"
                 className="flex-1 sm:flex-none"
               >
                 {showPreview ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-                {showPreview ? 'Hide' : 'Show'}
+                {showPreview ? 'Hide Feed' : 'Show Feed'}
               </Button>
             </div>
 
             {/* Video Feed */}
             <div className="relative">
-              <div className="aspect-video bg-gradient-to-br from-muted to-muted/50 rounded-xl overflow-hidden relative border-2 border-border">
+              <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden relative border-2 border-border">
                 {showPreview && (
                   <video
                     ref={videoRef}
@@ -512,31 +452,50 @@ const FaceRecognition: React.FC = () => {
                 
                 {/* Detection Overlay */}
                 {detectionStatus !== 'idle' && showPreview && (
-                  <div className={`absolute inset-0 transition-all duration-300 ${
+                  <div className={`absolute inset-0 transition-all duration-500 ${
                     detectionStatus === 'authorized' 
-                      ? 'bg-green-500/20 border-4 border-green-400 shadow-lg shadow-green-400/50' 
+                      ? 'bg-green-500/30 border-4 border-green-400 shadow-xl shadow-green-400/50' 
                       : detectionStatus === 'unauthorized'
-                      ? 'bg-red-500/20 border-4 border-red-400 shadow-lg shadow-red-400/50'
-                      : 'bg-blue-500/20 border-4 border-blue-400 shadow-lg shadow-blue-400/50'
+                      ? 'bg-red-500/30 border-4 border-red-400 shadow-xl shadow-red-400/50'
+                      : 'bg-blue-500/20 border-4 border-blue-400'
                   }`}>
-                    <div className="absolute bottom-4 left-4 right-4">
-                      <div className="bg-background/95 backdrop-blur-md rounded-lg p-3 sm:p-4 border shadow-lg">
-                        {detectionStatus === 'detecting' && (
+                    {/* Scanning Progress */}
+                    {detectionStatus === 'scanning' && (
+                      <div className="absolute top-4 left-4 right-4">
+                        <div className="bg-background/95 backdrop-blur-md rounded-lg p-3 border">
+                          <div className="flex items-center gap-3 mb-2">
+                            <Scan className="h-5 w-5 animate-pulse text-blue-500" />
+                            <span className="font-semibold text-sm">Scanning for faces...</span>
+                          </div>
+                          <Progress value={scanningProgress} className="h-2" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Analysis */}
+                    {detectionStatus === 'analyzing' && (
+                      <div className="absolute top-4 left-4 right-4">
+                        <div className="bg-background/95 backdrop-blur-md rounded-lg p-3 border">
                           <div className="flex items-center gap-3">
                             <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-                            <div>
-                              <div className="font-semibold text-sm">Analyzing...</div>
-                              <div className="text-xs text-muted-foreground">Scanning for faces</div>
-                            </div>
+                            <span className="font-semibold text-sm">Analyzing biometric data...</span>
                           </div>
-                        )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Results */}
+                    <div className="absolute bottom-4 left-4 right-4">
+                      <div className="bg-background/95 backdrop-blur-md rounded-lg p-4 border shadow-lg">
                         {detectionStatus === 'authorized' && lastDetection && (
                           <div className="flex items-center gap-3 text-green-600">
                             <CheckCircle className="h-6 w-6 flex-shrink-0" />
                             <div className="min-w-0">
-                              <div className="font-bold text-sm sm:text-base">✅ ACCESS GRANTED</div>
-                              <div className="font-medium text-sm truncate">{lastDetection.name}</div>
-                              <div className="text-xs opacity-90">{(lastDetection.confidence * 100).toFixed(1)}% match confidence</div>
+                              <div className="font-bold text-base">✅ ACCESS GRANTED</div>
+                              <div className="font-medium truncate">{lastDetection.name}</div>
+                              <div className="text-sm opacity-90">
+                                {(lastDetection.confidence * 100).toFixed(1)}% biometric match
+                              </div>
                             </div>
                           </div>
                         )}
@@ -544,9 +503,9 @@ const FaceRecognition: React.FC = () => {
                           <div className="flex items-center gap-3 text-red-600">
                             <AlertCircle className="h-6 w-6 flex-shrink-0" />
                             <div className="min-w-0">
-                              <div className="font-bold text-sm sm:text-base">🚨 ACCESS DENIED</div>
-                              <div className="font-medium text-sm">Unauthorized Person</div>
-                              <div className="text-xs opacity-90">Security alert triggered</div>
+                              <div className="font-bold text-base">🚨 ACCESS DENIED</div>
+                              <div className="font-medium">Unauthorized Individual</div>
+                              <div className="text-sm opacity-90">Security alert triggered</div>
                             </div>
                           </div>
                         )}
@@ -556,68 +515,67 @@ const FaceRecognition: React.FC = () => {
                 )}
 
                 {!isActive && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-muted to-muted/80">
+                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/90 to-slate-800/90">
                     <div className="text-center p-6">
-                      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted-foreground/10 flex items-center justify-center">
-                        <Camera className="h-8 w-8 text-muted-foreground" />
+                      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted-foreground/20 flex items-center justify-center">
+                        <Shield className="h-8 w-8 text-muted-foreground" />
                       </div>
-                      <p className="font-medium text-muted-foreground mb-1">Security System Inactive</p>
-                      <p className="text-sm text-muted-foreground">Click "Start Monitoring" to begin face recognition</p>
-                      {permissionStatus === 'denied' && (
-                        <p className="text-xs text-red-500 mt-2">Camera access required</p>
-                      )}
+                      <p className="font-medium text-white mb-1">Security System Offline</p>
+                      <p className="text-sm text-gray-300">Click "Start Security" to activate face recognition</p>
                     </div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Detection Status Alert */}
+            {/* Last Detection Info */}
             {lastDetection && (
               <Alert className={`border-2 ${lastDetection.isAuthorized ? 'border-green-400 bg-green-50 dark:bg-green-950' : 'border-red-400 bg-red-50 dark:bg-red-950'}`}>
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="font-medium">
-                  <span className={lastDetection.isAuthorized ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>
-                    Last Scan: <strong>{lastDetection.name}</strong> - 
-                    {(lastDetection.confidence * 100).toFixed(1)}% confidence
-                    {lastDetection.isAuthorized ? ' ✅' : ' ❌'}
-                  </span>
+                <AlertDescription>
+                  <div className="flex justify-between items-center">
+                    <span className={lastDetection.isAuthorized ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>
+                      <strong>{lastDetection.name}</strong> - {(lastDetection.confidence * 100).toFixed(1)}% confidence
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {lastDetection.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
                 </AlertDescription>
               </Alert>
             )}
           </CardContent>
         </Card>
 
-        {/* Controls Section */}
-        <div className="space-y-4 sm:space-y-6">
+        {/* Control Panel */}
+        <div className="space-y-6">
           {/* User Registration */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
+              <CardTitle className="flex items-center gap-2">
                 <UserCheck className="h-5 w-5" />
-                Add New User
+                Enroll New User
               </CardTitle>
-              <CardDescription className="text-sm">
+              <CardDescription>
                 Register authorized personnel
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="userName" className="text-sm font-medium">Full Name</Label>
+                <Label htmlFor="userName">Full Name</Label>
                 <Input
                   id="userName"
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
                   placeholder="Enter full name"
                   disabled={isRegistering}
-                  className="text-sm"
                 />
               </div>
 
               {isRegistering && (
                 <div className="space-y-2">
-                  <div className="flex justify-between text-sm font-medium">
-                    <span>Processing registration...</span>
+                  <div className="flex justify-between text-sm">
+                    <span>Processing enrollment...</span>
                     <span>{registrationProgress}%</span>
                   </div>
                   <Progress value={registrationProgress} className="h-2" />
@@ -628,24 +586,23 @@ const FaceRecognition: React.FC = () => {
                 onClick={capturePhoto}
                 disabled={!isActive || !newUserName.trim() || isRegistering}
                 className="w-full"
-                size="sm"
               >
                 {isRegistering ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Registering...
+                    Enrolling...
                   </>
                 ) : (
                   <>
                     <Upload className="h-4 w-4 mr-2" />
-                    Capture & Register
+                    Capture & Enroll
                   </>
                 )}
               </Button>
               
               {!isActive && (
                 <p className="text-xs text-muted-foreground text-center">
-                  Camera must be active to register new users
+                  Camera must be active to enroll users
                 </p>
               )}
             </CardContent>
@@ -654,26 +611,26 @@ const FaceRecognition: React.FC = () => {
           {/* Authorized Users */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
+              <CardTitle className="flex items-center gap-2">
                 <User className="h-5 w-5" />
                 Authorized Users ({authorizedUsers.length})
               </CardTitle>
-              <CardDescription className="text-sm">
+              <CardDescription>
                 Manage system access
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3 max-h-72 overflow-y-auto">
+              <div className="space-y-3 max-h-80 overflow-y-auto">
                 {loading ? (
-                  <div className="flex items-center justify-center py-6">
+                  <div className="flex items-center justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin mr-2" />
                     <span className="text-sm">Loading users...</span>
                   </div>
                 ) : authorizedUsers.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
+                  <div className="text-center py-8 text-muted-foreground">
                     <UserX className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p className="font-medium mb-1">No Authorized Users</p>
-                    <p className="text-xs">Register someone to get started</p>
+                    <p className="font-medium mb-1">No Enrolled Users</p>
+                    <p className="text-xs">Enroll someone to get started</p>
                   </div>
                 ) : (
                   authorizedUsers.map((user, index) => (
@@ -690,7 +647,7 @@ const FaceRecognition: React.FC = () => {
                           <div className="min-w-0 flex-1">
                             <p className="font-medium text-sm truncate">{user.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              Added {new Date(user.created_at).toLocaleDateString()}
+                              Enrolled {new Date(user.created_at).toLocaleDateString()}
                             </p>
                           </div>
                         </div>
@@ -698,7 +655,7 @@ const FaceRecognition: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDeleteUser(user.id, user.name)}
-                          className="ml-2 text-muted-foreground hover:text-destructive"
+                          className="text-muted-foreground hover:text-destructive"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
