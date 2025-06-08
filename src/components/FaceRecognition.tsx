@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Camera, Upload, User, UserCheck, UserX, Loader2, AlertCircle, CheckCircle, Trash2, Eye, EyeOff, Shield, ShieldAlert } from 'lucide-react';
+import { Camera, Upload, User, UserCheck, UserX, Loader2, AlertCircle, CheckCircle, Trash2, Eye, EyeOff, Shield, ShieldAlert, RefreshCw } from 'lucide-react';
 import { useSecuritySystem } from '@/hooks/useSecuritySystem';
 import { toast } from "@/hooks/use-toast";
 
@@ -21,6 +20,8 @@ const FaceRecognition: React.FC = () => {
   const [lastDetection, setLastDetection] = useState<{ name: string; confidence: number; isAuthorized: boolean } | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [detectionCount, setDetectionCount] = useState(0);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied' | 'prompt'>('checking');
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,34 +37,129 @@ const FaceRecognition: React.FC = () => {
     fetchAuthorizedUsers 
   } = useSecuritySystem();
 
-  // Initialize camera with mobile support
+  // Check camera permissions
+  const checkCameraPermissions = useCallback(async () => {
+    try {
+      console.log('Checking camera permissions...');
+      setPermissionStatus('checking');
+      
+      // Check if getUserMedia is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera not supported in this browser');
+      }
+
+      // Try to get permission status
+      if ('permissions' in navigator) {
+        const permission = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        console.log('Camera permission status:', permission.state);
+        
+        if (permission.state === 'denied') {
+          setPermissionStatus('denied');
+          setCameraError('Camera access denied. Please enable camera permissions in your browser settings.');
+          return false;
+        } else if (permission.state === 'granted') {
+          setPermissionStatus('granted');
+          return true;
+        }
+      }
+      
+      setPermissionStatus('prompt');
+      return true;
+    } catch (error) {
+      console.error('Permission check failed:', error);
+      setPermissionStatus('prompt');
+      return true; // Continue to try getUserMedia
+    }
+  }, []);
+
+  // Initialize camera with better error handling and fallbacks
   const initializeCamera = useCallback(async () => {
     try {
       console.log('Initializing camera...');
-      const constraints = {
-        video: {
-          width: { min: 640, ideal: 1280, max: 1920 },
-          height: { min: 480, ideal: 720, max: 1080 },
-          facingMode: { ideal: 'user' },
-          frameRate: { ideal: 30, max: 60 }
-        }
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setCameraError(null);
       
+      // Check permissions first
+      const permissionOk = await checkCameraPermissions();
+      if (!permissionOk) return;
+
+      // Try different constraint configurations
+      const constraintOptions = [
+        // High quality (preferred)
+        {
+          video: {
+            width: { min: 640, ideal: 1280, max: 1920 },
+            height: { min: 480, ideal: 720, max: 1080 },
+            facingMode: { ideal: 'user' },
+            frameRate: { ideal: 30, max: 60 }
+          }
+        },
+        // Medium quality fallback
+        {
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user',
+            frameRate: { ideal: 30 }
+          }
+        },
+        // Basic fallback
+        {
+          video: {
+            facingMode: 'user'
+          }
+        },
+        // Any camera fallback
+        {
+          video: true
+        }
+      ];
+
+      let stream = null;
+      let lastError = null;
+
+      for (const constraints of constraintOptions) {
+        try {
+          console.log('Trying constraints:', constraints);
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          console.log('Camera stream obtained with constraints:', constraints);
+          break;
+        } catch (error) {
+          console.log('Failed with constraints:', constraints, 'Error:', error);
+          lastError = error;
+        }
+      }
+
+      if (!stream) {
+        throw lastError || new Error('Failed to access camera with any configuration');
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         streamRef.current = stream;
         
         // Wait for video to be ready
-        await new Promise((resolve) => {
+        await new Promise((resolve, reject) => {
           if (videoRef.current) {
-            videoRef.current.onloadedmetadata = () => resolve(true);
+            videoRef.current.onloadedmetadata = () => {
+              console.log('Video metadata loaded, dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
+              resolve(true);
+            };
+            videoRef.current.onerror = (error) => {
+              console.error('Video error:', error);
+              reject(error);
+            };
+            // Timeout after 10 seconds
+            setTimeout(() => reject(new Error('Video loading timeout')), 10000);
+          } else {
+            reject(new Error('Video element not available'));
           }
         });
         
         setIsActive(true);
         setDetectionCount(0);
+        setPermissionStatus('granted');
+        setCameraError(null);
+        
         toast({
           title: "Camera Activated",
           description: "Face recognition system is now monitoring",
@@ -71,18 +167,40 @@ const FaceRecognition: React.FC = () => {
       }
     } catch (error) {
       console.error('Camera initialization failed:', error);
+      setPermissionStatus('denied');
+      
+      let errorMessage = "Failed to access camera. ";
+      
+      if (error instanceof Error) {
+        if (error.name === 'NotFoundError') {
+          errorMessage += "No camera found. Please connect a camera and try again.";
+        } else if (error.name === 'NotAllowedError') {
+          errorMessage += "Camera access denied. Please allow camera permissions and try again.";
+        } else if (error.name === 'NotReadableError') {
+          errorMessage += "Camera is already in use by another application.";
+        } else if (error.name === 'OverconstrainedError') {
+          errorMessage += "Camera doesn't support the required settings.";
+        } else {
+          errorMessage += error.message;
+        }
+      }
+      
+      setCameraError(errorMessage);
       toast({
         title: "Camera Error",
-        description: "Failed to access camera. Please check permissions and try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     }
-  }, []);
+  }, [checkCameraPermissions]);
 
   // Stop camera
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log('Stopped camera track:', track.kind);
+      });
       streamRef.current = null;
     }
     if (detectionIntervalRef.current) {
@@ -93,6 +211,7 @@ const FaceRecognition: React.FC = () => {
     setDetectionStatus('idle');
     setLastDetection(null);
     setDetectionCount(0);
+    setCameraError(null);
     console.log('Camera stopped');
   }, []);
 
@@ -303,6 +422,30 @@ const FaceRecognition: React.FC = () => {
         </div>
       </div>
 
+      {/* Camera Permission Alert */}
+      {cameraError && (
+        <Alert className="border-red-400 bg-red-50 dark:bg-red-950">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="font-medium">
+            <div className="flex items-center justify-between">
+              <span className="text-red-700 dark:text-red-300">{cameraError}</span>
+              <Button 
+                onClick={() => {
+                  setCameraError(null);
+                  initializeCamera();
+                }}
+                variant="outline" 
+                size="sm"
+                className="ml-2"
+              >
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Retry
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Camera Section - Takes up 2 columns on desktop */}
         <Card className="lg:col-span-2">
@@ -323,8 +466,14 @@ const FaceRecognition: React.FC = () => {
                 variant={isActive ? 'destructive' : 'default'}
                 size="sm"
                 className="flex-1 sm:flex-none"
+                disabled={permissionStatus === 'checking'}
               >
-                {isActive ? (
+                {permissionStatus === 'checking' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Checking...
+                  </>
+                ) : isActive ? (
                   <>
                     <ShieldAlert className="h-4 w-4 mr-2" />
                     Stop Monitoring
@@ -414,6 +563,9 @@ const FaceRecognition: React.FC = () => {
                       </div>
                       <p className="font-medium text-muted-foreground mb-1">Security System Inactive</p>
                       <p className="text-sm text-muted-foreground">Click "Start Monitoring" to begin face recognition</p>
+                      {permissionStatus === 'denied' && (
+                        <p className="text-xs text-red-500 mt-2">Camera access required</p>
+                      )}
                     </div>
                   </div>
                 )}
