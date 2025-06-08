@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Shield, Camera, AlertTriangle, Wifi, Settings, Monitor } from 'lucide-react';
@@ -7,6 +6,7 @@ import FaceRecognition from '@/components/FaceRecognition';
 import AlertMonitor from '@/components/AlertMonitor';
 import ESP32Manager from '@/components/ESP32Manager';
 import SystemSettings from '@/components/SystemSettings';
+import Footer from '@/components/Footer';
 import { useSecuritySystem } from '@/hooks/useSecuritySystem';
 
 const Index = () => {
@@ -73,7 +73,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <div className="border-b bg-card">
         <div className="container mx-auto px-4 py-4">
@@ -98,7 +98,7 @@ const Index = () => {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 py-6 flex-1">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5 bg-muted/50">
             <TabsTrigger 
@@ -171,6 +171,9 @@ const Index = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Footer */}
+      <Footer />
     </div>
   );
 };
