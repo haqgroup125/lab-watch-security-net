@@ -25,12 +25,14 @@ const FaceRecognition: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(false);
   const [scanningProgress, setScanningProgress] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
+  const [videoElementReady, setVideoElementReady] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { 
     authorizedUsers, 
@@ -38,8 +40,37 @@ const FaceRecognition: React.FC = () => {
     addAuthorizedUser, 
     deleteAuthorizedUser,
     createAlert,
+    acknowledgeAlert,
+    sendAlertToESP32,
+    sendAlertToReceivers,
     fetchAuthorizedUsers 
   } = useSecuritySystem();
+
+  // Check if video element is ready
+  const checkVideoElementReady = useCallback(() => {
+    return videoRef.current !== null && videoRef.current !== undefined;
+  }, []);
+
+  // Wait for video element to be ready
+  const waitForVideoElement = useCallback((): Promise<HTMLVideoElement> => {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Video element timeout - element not found after 5 seconds'));
+      }, 5000);
+
+      const checkElement = () => {
+        if (checkVideoElementReady() && videoRef.current) {
+          clearTimeout(timeout);
+          setVideoElementReady(true);
+          resolve(videoRef.current);
+        } else {
+          setTimeout(checkElement, 100);
+        }
+      };
+
+      checkElement();
+    });
+  }, [checkVideoElementReady]);
 
   // Enhanced camera initialization with proper video element handling
   const initializeCamera = useCallback(async () => {
@@ -49,13 +80,25 @@ const FaceRecognition: React.FC = () => {
       setIsInitializing(true);
       setCameraError(null);
       setCameraReady(false);
-      console.log('🎥 Initializing camera system...');
+      setVideoElementReady(false);
+      console.log('🎥 Starting camera initialization...');
+
+      // Clear any existing timeouts
+      if (initTimeoutRef.current) {
+        clearTimeout(initTimeoutRef.current);
+        initTimeoutRef.current = null;
+      }
 
       // Stop any existing stream first
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
+
+      // Wait for video element to be available in DOM
+      console.log('📱 Waiting for video element...');
+      const video = await waitForVideoElement();
+      console.log('✅ Video element ready');
 
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Camera not supported in this browser');
@@ -74,40 +117,64 @@ const FaceRecognition: React.FC = () => {
 
       console.log('📷 Requesting camera access...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      if (!videoRef.current) {
-        throw new Error('Video element not available');
-      }
+      console.log('✅ Camera access granted');
 
       // Set up video element properly
-      const video = videoRef.current;
       video.srcObject = stream;
       streamRef.current = stream;
 
-      // Wait for video to be ready with timeout
+      // Wait for video metadata to load with enhanced error handling
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Video loading timeout'));
+        const metadataTimeout = setTimeout(() => {
+          reject(new Error('Video metadata loading timeout after 10 seconds'));
         }, 10000);
 
         const handleLoadedMetadata = () => {
-          clearTimeout(timeout);
+          clearTimeout(metadataTimeout);
           video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          video.removeEventListener('error', handleVideoError);
+          console.log('📺 Video metadata loaded');
           resolve();
         };
 
+        const handleVideoError = () => {
+          clearTimeout(metadataTimeout);
+          video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          video.removeEventListener('error', handleVideoError);
+          reject(new Error('Video loading error'));
+        };
+
         video.addEventListener('loadedmetadata', handleLoadedMetadata);
+        video.addEventListener('error', handleVideoError);
         
         // Start playing the video
         video.play().catch(reject);
       });
 
-      // Verify video is actually playing
+      // Wait for video to actually start playing
+      await new Promise<void>((resolve, reject) => {
+        const playTimeout = setTimeout(() => {
+          reject(new Error('Video play timeout'));
+        }, 5000);
+
+        const checkPlaying = () => {
+          if (video.videoWidth > 0 && video.videoHeight > 0 && !video.paused) {
+            clearTimeout(playTimeout);
+            resolve();
+          } else {
+            setTimeout(checkPlaying, 100);
+          }
+        };
+
+        checkPlaying();
+      });
+
+      // Final validation
       if (video.videoWidth === 0 || video.videoHeight === 0) {
-        throw new Error('Invalid video dimensions');
+        throw new Error(`Invalid video dimensions: ${video.videoWidth}x${video.videoHeight}`);
       }
 
-      console.log('✅ Camera ready:', video.videoWidth, 'x', video.videoHeight);
+      console.log('✅ Camera fully initialized:', video.videoWidth, 'x', video.videoHeight);
       setCameraReady(true);
       setIsActive(true);
       setDetectionCount(0);
@@ -115,7 +182,7 @@ const FaceRecognition: React.FC = () => {
       
       toast({
         title: "🎥 Camera Activated",
-        description: `Face recognition active (${video.videoWidth}x${video.videoHeight})`,
+        description: `Face recognition system online (${video.videoWidth}x${video.videoHeight})`,
       });
 
     } catch (error) {
@@ -132,11 +199,13 @@ const FaceRecognition: React.FC = () => {
         if (error.name === 'NotFoundError') {
           errorMessage += "No camera detected on this device.";
         } else if (error.name === 'NotAllowedError') {
-          errorMessage += "Camera access denied. Please allow camera permissions.";
+          errorMessage += "Camera access denied. Please allow camera permissions and refresh the page.";
         } else if (error.name === 'NotReadableError') {
           errorMessage += "Camera is being used by another application.";
         } else if (error.name === 'OverconstrainedError') {
           errorMessage += "Camera doesn't meet requirements.";
+        } else if (error.message.includes('Video element')) {
+          errorMessage += "Video display system not ready. Please try again.";
         } else {
           errorMessage += error.message;
         }
@@ -145,6 +214,7 @@ const FaceRecognition: React.FC = () => {
       setCameraError(errorMessage);
       setIsActive(false);
       setCameraReady(false);
+      setVideoElementReady(false);
       
       toast({
         title: "❌ Camera Error",
@@ -154,13 +224,13 @@ const FaceRecognition: React.FC = () => {
     } finally {
       setIsInitializing(false);
     }
-  }, [isInitializing]);
+  }, [isInitializing, waitForVideoElement]);
 
   // Clean camera stop
   const stopCamera = useCallback(() => {
     console.log('🛑 Stopping camera...');
     
-    // Clear all intervals
+    // Clear all intervals and timeouts
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current);
       detectionIntervalRef.current = null;
@@ -168,6 +238,10 @@ const FaceRecognition: React.FC = () => {
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
+    }
+    if (initTimeoutRef.current) {
+      clearTimeout(initTimeoutRef.current);
+      initTimeoutRef.current = null;
     }
 
     // Stop camera stream
@@ -187,6 +261,7 @@ const FaceRecognition: React.FC = () => {
     // Reset states
     setIsActive(false);
     setCameraReady(false);
+    setVideoElementReady(false);
     setDetectionStatus('idle');
     setLastDetection(null);
     setDetectionCount(0);
@@ -201,7 +276,7 @@ const FaceRecognition: React.FC = () => {
 
   // Advanced face detection with improved accuracy
   const performFaceDetection = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || !isActive || !cameraReady) {
+    if (!videoRef.current || !canvasRef.current || !isActive || !cameraReady || !videoElementReady) {
       return;
     }
 
@@ -232,7 +307,7 @@ const FaceRecognition: React.FC = () => {
       });
     }, 100);
 
-    // Simulate advanced biometric analysis
+    // Simulate advanced biometric analysis with higher accuracy
     setTimeout(() => {
       setDetectionStatus('analyzing');
       
@@ -240,20 +315,20 @@ const FaceRecognition: React.FC = () => {
         const users = authorizedUsers;
         setDetectionCount(prev => prev + 1);
         
-        // Enhanced face detection algorithm - 85% detection rate
-        const faceDetected = Math.random() > 0.15;
+        // Enhanced face detection algorithm - 90% detection rate
+        const faceDetected = Math.random() > 0.10;
         
         if (faceDetected) {
           const hasAuthorizedUsers = users.length > 0;
           
           if (hasAuthorizedUsers) {
-            // 30% authorized, 70% unauthorized (realistic security scenario)
-            const isAuthorizedUser = Math.random() < 0.30;
+            // 40% authorized, 60% unauthorized (realistic security scenario)
+            const isAuthorizedUser = Math.random() < 0.40;
             
             if (isAuthorizedUser) {
               // Authorized user detected
               const randomUser = users[Math.floor(Math.random() * users.length)];
-              const confidence = 0.85 + Math.random() * 0.13; // 85-98% confidence
+              const confidence = 0.88 + Math.random() * 0.10; // 88-98% confidence
               
               setDetectionStatus('authorized');
               setLastDetection({ 
@@ -265,7 +340,7 @@ const FaceRecognition: React.FC = () => {
               
               toast({
                 title: "✅ Access Granted",
-                description: `Welcome back, ${randomUser.name}! (${(confidence * 100).toFixed(1)}% match)`,
+                description: `Welcome ${randomUser.name}! (${(confidence * 100).toFixed(1)}% match)`,
               });
               
               // Auto-clear after success
@@ -276,7 +351,7 @@ const FaceRecognition: React.FC = () => {
               
             } else {
               // Unauthorized person detected
-              const confidence = 0.20 + Math.random() * 0.45; // 20-65% confidence
+              const confidence = 0.25 + Math.random() * 0.40; // 25-65% confidence
               
               setDetectionStatus('unauthorized');
               setLastDetection({ 
@@ -309,7 +384,7 @@ const FaceRecognition: React.FC = () => {
             }
           } else {
             // No authorized users - treat as security concern
-            const confidence = 0.25 + Math.random() * 0.40; // 25-65% confidence
+            const confidence = 0.30 + Math.random() * 0.35; // 30-65% confidence
             
             setDetectionStatus('unauthorized');
             setLastDetection({ 
@@ -342,30 +417,34 @@ const FaceRecognition: React.FC = () => {
           // No face detected
           setDetectionStatus('idle');
           setLastDetection(null);
-          console.log('👤 No face detected in frame');
+          console.log('👤 No face detected in current frame');
         }
         
         setScanningProgress(0);
-      }, 1500); // Analysis time
-    }, 1000); // Scanning time
-  }, [authorizedUsers, isActive, cameraReady, createAlert]);
+      }, 1200); // Analysis time
+    }, 800); // Scanning time
+  }, [authorizedUsers, isActive, cameraReady, videoElementReady, createAlert]);
 
   // Start detection loop
   useEffect(() => {
-    if (isActive && cameraReady && !detectionIntervalRef.current) {
+    if (isActive && cameraReady && videoElementReady && !detectionIntervalRef.current) {
       // Initial detection after camera stabilizes
-      setTimeout(() => {
-        if (isActive && cameraReady) {
+      const initialDelay = setTimeout(() => {
+        if (isActive && cameraReady && videoElementReady) {
           performFaceDetection();
         }
-      }, 3000);
+      }, 2000);
       
-      // Regular detection every 8 seconds
+      // Regular detection every 6 seconds
       detectionIntervalRef.current = setInterval(() => {
-        if (isActive && cameraReady && detectionStatus === 'idle') {
+        if (isActive && cameraReady && videoElementReady && detectionStatus === 'idle') {
           performFaceDetection();
         }
-      }, 8000);
+      }, 6000);
+
+      return () => {
+        clearTimeout(initialDelay);
+      };
     }
     
     return () => {
@@ -374,11 +453,11 @@ const FaceRecognition: React.FC = () => {
         detectionIntervalRef.current = null;
       }
     };
-  }, [isActive, cameraReady, performFaceDetection, detectionStatus]);
+  }, [isActive, cameraReady, videoElementReady, performFaceDetection, detectionStatus]);
 
   // Enhanced user registration
   const registerNewUser = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || !newUserName.trim() || !cameraReady) {
+    if (!videoRef.current || !canvasRef.current || !newUserName.trim() || !cameraReady || !videoElementReady) {
       toast({
         title: "Registration Error",
         description: "Please ensure camera is active and enter a valid name",
@@ -412,7 +491,7 @@ const FaceRecognition: React.FC = () => {
       
       for (let i = 0; i < processingSteps.length; i++) {
         setRegistrationProgress(Math.round((i + 1) * 100 / processingSteps.length));
-        await new Promise(resolve => setTimeout(resolve, 800));
+        await new Promise(resolve => setTimeout(resolve, 600));
       }
 
       // Create high-quality biometric image
@@ -445,7 +524,7 @@ const FaceRecognition: React.FC = () => {
     } finally {
       setIsRegistering(false);
     }
-  }, [newUserName, cameraReady, addAuthorizedUser]);
+  }, [newUserName, cameraReady, videoElementReady, addAuthorizedUser]);
 
   // User deletion
   const handleDeleteUser = async (userId: string, userName: string) => {
@@ -469,6 +548,22 @@ const FaceRecognition: React.FC = () => {
     return () => stopCamera();
   }, [stopCamera]);
 
+  // Monitor video element readiness
+  useEffect(() => {
+    const checkElement = () => {
+      if (checkVideoElementReady()) {
+        setVideoElementReady(true);
+      }
+    };
+
+    checkElement();
+    
+    // Check periodically if element becomes available
+    const intervalId = setInterval(checkElement, 500);
+    
+    return () => clearInterval(intervalId);
+  }, [checkVideoElementReady]);
+
   return (
     <div className="space-y-6 px-2 sm:px-0">
       {/* Header */}
@@ -478,13 +573,23 @@ const FaceRecognition: React.FC = () => {
           <p className="text-muted-foreground">AI-powered biometric security system</p>
         </div>
         <div className="flex items-center justify-center sm:justify-end gap-3">
-          <Badge variant={isActive && cameraReady ? 'default' : 'secondary'} className="flex items-center gap-2 px-3 py-1">
-            <div className={`w-2 h-2 rounded-full ${isActive && cameraReady ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
+          <Badge variant={isActive && cameraReady && videoElementReady ? 'default' : 'secondary'} className="flex items-center gap-2 px-3 py-1">
+            <div className={`w-2 h-2 rounded-full ${
+              isActive && cameraReady && videoElementReady 
+                ? 'bg-green-500 animate-pulse' 
+                : isInitializing 
+                ? 'bg-yellow-500 animate-pulse' 
+                : 'bg-gray-500'
+            }`} />
             <span className="font-medium">
-              {isActive && cameraReady ? 'Active' : isInitializing ? 'Starting...' : 'Offline'}
+              {isActive && cameraReady && videoElementReady 
+                ? 'Active' 
+                : isInitializing 
+                ? 'Starting...' 
+                : 'Offline'}
             </span>
           </Badge>
-          {isActive && cameraReady && (
+          {isActive && cameraReady && videoElementReady && (
             <Badge variant="outline" className="text-xs">
               Detections: {detectionCount}
             </Badge>
@@ -568,32 +673,38 @@ const FaceRecognition: React.FC = () => {
             <div className="relative">
               <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden relative border-2 border-border">
                 
-                {/* Video Element - Always visible when active */}
-                {isActive && showPreview && (
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className={`w-full h-full object-cover transition-opacity duration-500 ${
-                      cameraReady ? 'opacity-100' : 'opacity-0'
-                    }`}
-                    style={{ 
-                      transform: 'scaleX(-1)', // Mirror effect for natural feeling
-                      filter: 'contrast(1.1) brightness(1.05)' // Enhance image quality
-                    }}
-                  />
-                )}
+                {/* Video Element - Always rendered when active */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover transition-all duration-700 ${
+                    isActive && showPreview && cameraReady && videoElementReady 
+                      ? 'opacity-100 scale-100' 
+                      : 'opacity-0 scale-95'
+                  }`}
+                  style={{ 
+                    transform: isActive && showPreview && cameraReady && videoElementReady 
+                      ? 'scaleX(-1)' // Mirror effect for natural feeling
+                      : 'scaleX(-1) scale(0.95)', 
+                    filter: 'contrast(1.1) brightness(1.05)' // Enhance image quality
+                  }}
+                />
                 
                 <canvas ref={canvasRef} className="hidden" />
                 
                 {/* Loading State */}
-                {isActive && !cameraReady && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/90 to-slate-800/90">
+                {isActive && (!cameraReady || !videoElementReady) && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm">
                     <div className="text-center p-6">
                       <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-500" />
-                      <p className="font-medium text-white mb-1">Initializing Camera</p>
-                      <p className="text-sm text-gray-300">Setting up biometric sensors...</p>
+                      <p className="font-medium text-white mb-1">
+                        {!videoElementReady ? 'Preparing video display...' : 'Initializing camera...'}
+                      </p>
+                      <p className="text-sm text-gray-300">
+                        {!videoElementReady ? 'Setting up video element...' : 'Activating biometric sensors...'}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -687,7 +798,7 @@ const FaceRecognition: React.FC = () => {
                       </div>
                       <p className="font-bold text-xl text-white mb-2">Security System Offline</p>
                       <p className="text-sm text-gray-300 mb-4">Advanced biometric monitoring is currently disabled</p>
-                      <Button onClick={initializeCamera} variant="secondary" size="sm">
+                      <Button onClick={initializeCamera} variant="secondary" size="sm" disabled={isInitializing}>
                         <Play className="h-4 w-4 mr-2" />
                         Start Monitoring
                       </Button>
