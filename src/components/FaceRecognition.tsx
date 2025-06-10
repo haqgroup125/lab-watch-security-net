@@ -97,8 +97,8 @@ const FaceRecognition: React.FC = () => {
     const newEnrolledFaces = new Map<string, string>();
     
     authorizedUsers.forEach(user => {
-      if (user.face_signature) {
-        newEnrolledFaces.set(user.id, user.face_signature);
+      if (user.face_encoding && typeof user.face_encoding === 'string') {
+        newEnrolledFaces.set(user.id, user.face_encoding);
       }
     });
     
@@ -126,12 +126,17 @@ const FaceRecognition: React.FC = () => {
         throw new Error('Camera not supported in this browser');
       }
 
-      // Wait for video element to be available
+      // Wait for video element to be available with multiple attempts
+      let attempts = 0;
+      const maxAttempts = 10;
+      while (!videoRef.current && attempts < maxAttempts) {
+        console.log(`🔄 Waiting for video element (attempt ${attempts + 1})`);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        attempts++;
+      }
+
       if (!videoRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        if (!videoRef.current) {
-          throw new Error('Video element not available');
-        }
+        throw new Error('Video element is not available after multiple attempts');
       }
 
       const constraints = {
@@ -525,8 +530,8 @@ const FaceRecognition: React.FC = () => {
 
       const file = new File([blob], `${newUserName.trim()}_biometric.jpg`, { type: 'image/jpeg' });
       
-      // Add user with face signature
-      await addAuthorizedUser(newUserName.trim(), file, faceSignature);
+      // Add user with face signature - only pass name and file
+      await addAuthorizedUser(newUserName.trim(), file);
       
       setNewUserName('');
       setRegistrationProgress(0);
