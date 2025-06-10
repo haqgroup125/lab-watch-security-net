@@ -25,14 +25,14 @@ const FaceRecognition: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(false);
   const [scanningProgress, setScanningProgress] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
-  const [videoElementReady, setVideoElementReady] = useState(false);
+  const [currentFaceData, setCurrentFaceData] = useState<string | null>(null);
+  const [enrolledFaces, setEnrolledFaces] = useState<Map<string, string>>(new Map());
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { 
     authorizedUsers, 
@@ -46,33 +46,67 @@ const FaceRecognition: React.FC = () => {
     fetchAuthorizedUsers 
   } = useSecuritySystem();
 
-  // Check if video element is ready
-  const checkVideoElementReady = useCallback(() => {
-    return videoRef.current !== null && videoRef.current !== undefined;
+  // Generate simple face signature from image data
+  const generateFaceSignature = useCallback((canvas: HTMLCanvasElement): string => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    
+    // Get image data from center region (face area)
+    const centerX = canvas.width * 0.3;
+    const centerY = canvas.height * 0.2;
+    const width = canvas.width * 0.4;
+    const height = canvas.height * 0.6;
+    
+    const imageData = ctx.getImageData(centerX, centerY, width, height);
+    const data = imageData.data;
+    
+    // Create simple signature based on color patterns
+    let signature = '';
+    const step = 4 * 10; // Sample every 10th pixel
+    
+    for (let i = 0; i < data.length; i += step) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Convert to grayscale and create pattern
+      const gray = (r + g + b) / 3;
+      signature += Math.floor(gray / 32).toString(); // 0-7 range
+    }
+    
+    return signature;
   }, []);
 
-  // Wait for video element to be ready
-  const waitForVideoElement = useCallback((): Promise<HTMLVideoElement> => {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Video element timeout - element not found after 5 seconds'));
-      }, 5000);
+  // Compare two face signatures
+  const compareFaceSignatures = useCallback((sig1: string, sig2: string): number => {
+    if (!sig1 || !sig2 || sig1.length !== sig2.length) return 0;
+    
+    let matches = 0;
+    const tolerance = 1; // Allow 1 level difference
+    
+    for (let i = 0; i < sig1.length; i++) {
+      const diff = Math.abs(parseInt(sig1[i]) - parseInt(sig2[i]));
+      if (diff <= tolerance) matches++;
+    }
+    
+    return matches / sig1.length;
+  }, []);
 
-      const checkElement = () => {
-        if (checkVideoElementReady() && videoRef.current) {
-          clearTimeout(timeout);
-          setVideoElementReady(true);
-          resolve(videoRef.current);
-        } else {
-          setTimeout(checkElement, 100);
-        }
-      };
-
-      checkElement();
+  // Update enrolled faces when authorized users change
+  useEffect(() => {
+    const newEnrolledFaces = new Map<string, string>();
+    
+    authorizedUsers.forEach(user => {
+      if (user.face_signature) {
+        newEnrolledFaces.set(user.id, user.face_signature);
+      }
     });
-  }, [checkVideoElementReady]);
+    
+    setEnrolledFaces(newEnrolledFaces);
+    console.log(`👥 Updated enrolled faces: ${newEnrolledFaces.size} users`);
+  }, [authorizedUsers]);
 
-  // Enhanced camera initialization with proper video element handling
+  // Enhanced camera initialization
   const initializeCamera = useCallback(async () => {
     if (isInitializing) return;
     
@@ -80,14 +114,7 @@ const FaceRecognition: React.FC = () => {
       setIsInitializing(true);
       setCameraError(null);
       setCameraReady(false);
-      setVideoElementReady(false);
       console.log('🎥 Starting camera initialization...');
-
-      // Clear any existing timeouts
-      if (initTimeoutRef.current) {
-        clearTimeout(initTimeoutRef.current);
-        initTimeoutRef.current = null;
-      }
 
       // Stop any existing stream first
       if (streamRef.current) {
@@ -95,16 +122,18 @@ const FaceRecognition: React.FC = () => {
         streamRef.current = null;
       }
 
-      // Wait for video element to be available in DOM
-      console.log('📱 Waiting for video element...');
-      const video = await waitForVideoElement();
-      console.log('✅ Video element ready');
-
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Camera not supported in this browser');
       }
 
-      // Enhanced camera constraints for better quality and compatibility
+      // Wait for video element to be available
+      if (!videoRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (!videoRef.current) {
+          throw new Error('Video element not available');
+        }
+      }
+
       const constraints = {
         video: {
           width: { ideal: 1280, min: 640, max: 1920 },
@@ -119,26 +148,23 @@ const FaceRecognition: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('✅ Camera access granted');
 
-      // Set up video element properly
+      const video = videoRef.current;
       video.srcObject = stream;
       streamRef.current = stream;
 
-      // Wait for video metadata to load with enhanced error handling
+      // Wait for video to be ready
       await new Promise<void>((resolve, reject) => {
-        const metadataTimeout = setTimeout(() => {
-          reject(new Error('Video metadata loading timeout after 10 seconds'));
-        }, 10000);
-
+        const timeout = setTimeout(() => reject(new Error('Video loading timeout')), 10000);
+        
         const handleLoadedMetadata = () => {
-          clearTimeout(metadataTimeout);
+          clearTimeout(timeout);
           video.removeEventListener('loadedmetadata', handleLoadedMetadata);
           video.removeEventListener('error', handleVideoError);
-          console.log('📺 Video metadata loaded');
           resolve();
         };
 
         const handleVideoError = () => {
-          clearTimeout(metadataTimeout);
+          clearTimeout(timeout);
           video.removeEventListener('loadedmetadata', handleLoadedMetadata);
           video.removeEventListener('error', handleVideoError);
           reject(new Error('Video loading error'));
@@ -147,32 +173,24 @@ const FaceRecognition: React.FC = () => {
         video.addEventListener('loadedmetadata', handleLoadedMetadata);
         video.addEventListener('error', handleVideoError);
         
-        // Start playing the video
         video.play().catch(reject);
       });
 
-      // Wait for video to actually start playing
+      // Wait for video to start playing
       await new Promise<void>((resolve, reject) => {
-        const playTimeout = setTimeout(() => {
-          reject(new Error('Video play timeout'));
-        }, 5000);
-
+        const timeout = setTimeout(() => reject(new Error('Video play timeout')), 5000);
+        
         const checkPlaying = () => {
           if (video.videoWidth > 0 && video.videoHeight > 0 && !video.paused) {
-            clearTimeout(playTimeout);
+            clearTimeout(timeout);
             resolve();
           } else {
             setTimeout(checkPlaying, 100);
           }
         };
-
+        
         checkPlaying();
       });
-
-      // Final validation
-      if (video.videoWidth === 0 || video.videoHeight === 0) {
-        throw new Error(`Invalid video dimensions: ${video.videoWidth}x${video.videoHeight}`);
-      }
 
       console.log('✅ Camera fully initialized:', video.videoWidth, 'x', video.videoHeight);
       setCameraReady(true);
@@ -188,7 +206,6 @@ const FaceRecognition: React.FC = () => {
     } catch (error) {
       console.error('❌ Camera initialization failed:', error);
       
-      // Clean up on error
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -202,10 +219,6 @@ const FaceRecognition: React.FC = () => {
           errorMessage += "Camera access denied. Please allow camera permissions and refresh the page.";
         } else if (error.name === 'NotReadableError') {
           errorMessage += "Camera is being used by another application.";
-        } else if (error.name === 'OverconstrainedError') {
-          errorMessage += "Camera doesn't meet requirements.";
-        } else if (error.message.includes('Video element')) {
-          errorMessage += "Video display system not ready. Please try again.";
         } else {
           errorMessage += error.message;
         }
@@ -214,7 +227,6 @@ const FaceRecognition: React.FC = () => {
       setCameraError(errorMessage);
       setIsActive(false);
       setCameraReady(false);
-      setVideoElementReady(false);
       
       toast({
         title: "❌ Camera Error",
@@ -224,13 +236,12 @@ const FaceRecognition: React.FC = () => {
     } finally {
       setIsInitializing(false);
     }
-  }, [isInitializing, waitForVideoElement]);
+  }, [isInitializing]);
 
-  // Clean camera stop
+  // Stop camera
   const stopCamera = useCallback(() => {
     console.log('🛑 Stopping camera...');
     
-    // Clear all intervals and timeouts
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current);
       detectionIntervalRef.current = null;
@@ -239,12 +250,7 @@ const FaceRecognition: React.FC = () => {
       clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
     }
-    if (initTimeoutRef.current) {
-      clearTimeout(initTimeoutRef.current);
-      initTimeoutRef.current = null;
-    }
 
-    // Stop camera stream
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => {
         track.stop();
@@ -253,20 +259,18 @@ const FaceRecognition: React.FC = () => {
       streamRef.current = null;
     }
 
-    // Clear video element
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
 
-    // Reset states
     setIsActive(false);
     setCameraReady(false);
-    setVideoElementReady(false);
     setDetectionStatus('idle');
     setLastDetection(null);
     setDetectionCount(0);
     setScanningProgress(0);
     setCameraError(null);
+    setCurrentFaceData(null);
     
     toast({
       title: "📴 Camera Stopped",
@@ -274,9 +278,9 @@ const FaceRecognition: React.FC = () => {
     });
   }, []);
 
-  // Advanced face detection with improved accuracy
+  // Improved face detection algorithm
   const performFaceDetection = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || !isActive || !cameraReady || !videoElementReady) {
+    if (!videoRef.current || !canvasRef.current || !isActive || !cameraReady) {
       return;
     }
 
@@ -291,156 +295,165 @@ const FaceRecognition: React.FC = () => {
     setDetectionStatus('scanning');
     setScanningProgress(0);
     
-    // Capture high-quality frame for analysis
+    // Capture frame for analysis
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
     
-    // Smooth scanning animation
+    // Scanning animation
     const scanningInterval = setInterval(() => {
       setScanningProgress(prev => {
         if (prev >= 100) {
           clearInterval(scanningInterval);
           return 100;
         }
-        return prev + 10;
+        return prev + 12;
       });
-    }, 100);
+    }, 80);
 
-    // Simulate advanced biometric analysis with higher accuracy
+    // Simulate processing time
     setTimeout(() => {
       setDetectionStatus('analyzing');
       
       setTimeout(() => {
-        const users = authorizedUsers;
-        setDetectionCount(prev => prev + 1);
+        // Generate face signature from current frame
+        const currentSignature = generateFaceSignature(canvas);
+        setCurrentFaceData(currentSignature);
         
-        // Enhanced face detection algorithm - 90% detection rate
-        const faceDetected = Math.random() > 0.10;
-        
-        if (faceDetected) {
-          const hasAuthorizedUsers = users.length > 0;
-          
-          if (hasAuthorizedUsers) {
-            // 40% authorized, 60% unauthorized (realistic security scenario)
-            const isAuthorizedUser = Math.random() < 0.40;
-            
-            if (isAuthorizedUser) {
-              // Authorized user detected
-              const randomUser = users[Math.floor(Math.random() * users.length)];
-              const confidence = 0.88 + Math.random() * 0.10; // 88-98% confidence
-              
-              setDetectionStatus('authorized');
-              setLastDetection({ 
-                name: randomUser.name, 
-                confidence, 
-                isAuthorized: true,
-                timestamp: new Date()
-              });
-              
-              toast({
-                title: "✅ Access Granted",
-                description: `Welcome ${randomUser.name}! (${(confidence * 100).toFixed(1)}% match)`,
-              });
-              
-              // Auto-clear after success
-              setTimeout(() => {
-                setDetectionStatus('idle');
-                setLastDetection(null);
-              }, 4000);
-              
-            } else {
-              // Unauthorized person detected
-              const confidence = 0.25 + Math.random() * 0.40; // 25-65% confidence
-              
-              setDetectionStatus('unauthorized');
-              setLastDetection({ 
-                name: 'Unknown Individual', 
-                confidence, 
-                isAuthorized: false,
-                timestamp: new Date()
-              });
-              
-              // Create security alert
-              createAlert({
-                alert_type: 'Unauthorized Access Attempt',
-                severity: 'high',
-                details: `Unauthorized person detected at ${new Date().toLocaleTimeString()}. Biometric confidence: ${(confidence * 100).toFixed(1)}%`,
-                source_device: 'Face Recognition System',
-                confidence_score: Math.round(confidence * 100)
-              });
-              
-              toast({
-                title: "🚨 Security Alert",
-                description: "Unauthorized access attempt detected and logged!",
-                variant: "destructive",
-              });
-              
-              // Auto-clear after alert
-              setTimeout(() => {
-                setDetectionStatus('idle');
-                setLastDetection(null);
-              }, 6000);
-            }
-          } else {
-            // No authorized users - treat as security concern
-            const confidence = 0.30 + Math.random() * 0.35; // 30-65% confidence
-            
-            setDetectionStatus('unauthorized');
-            setLastDetection({ 
-              name: 'Unregistered Person', 
-              confidence, 
-              isAuthorized: false,
-              timestamp: new Date()
-            });
-            
-            createAlert({
-              alert_type: 'Person Detected - No Enrolled Users',
-              severity: 'medium',
-              details: `Person detected but no authorized users enrolled. Time: ${new Date().toLocaleTimeString()}`,
-              source_device: 'Face Recognition System',
-              confidence_score: Math.round(confidence * 100)
-            });
-            
-            toast({
-              title: "⚠️ Person Detected",
-              description: "No authorized users enrolled in system",
-              variant: "destructive",
-            });
-            
-            setTimeout(() => {
-              setDetectionStatus('idle');
-              setLastDetection(null);
-            }, 5000);
-          }
-        } else {
-          // No face detected
+        if (!currentSignature) {
+          console.log('👤 No face detected in current frame');
           setDetectionStatus('idle');
           setLastDetection(null);
-          console.log('👤 No face detected in current frame');
+          setScanningProgress(0);
+          setDetectionCount(prev => prev + 1);
+          return;
+        }
+
+        console.log('🔍 Face detected, comparing with enrolled users...');
+        setDetectionCount(prev => prev + 1);
+        
+        // Check against enrolled faces
+        let bestMatch = { userId: '', confidence: 0, userName: '' };
+        
+        enrolledFaces.forEach((signature, userId) => {
+          const confidence = compareFaceSignatures(currentSignature, signature);
+          console.log(`👤 Comparing with user ${userId}: ${(confidence * 100).toFixed(1)}% match`);
+          
+          if (confidence > bestMatch.confidence) {
+            const user = authorizedUsers.find(u => u.id === userId);
+            if (user) {
+              bestMatch = { userId, confidence, userName: user.name };
+            }
+          }
+        });
+
+        // Decision threshold - 70% confidence required for authorization
+        const CONFIDENCE_THRESHOLD = 0.7;
+        
+        if (bestMatch.confidence >= CONFIDENCE_THRESHOLD) {
+          // Authorized user detected
+          setDetectionStatus('authorized');
+          setLastDetection({ 
+            name: bestMatch.userName, 
+            confidence: bestMatch.confidence,
+            isAuthorized: true,
+            timestamp: new Date()
+          });
+          
+          console.log(`✅ Authorized user detected: ${bestMatch.userName} (${(bestMatch.confidence * 100).toFixed(1)}%)`);
+          
+          toast({
+            title: "✅ Access Granted",
+            description: `Welcome ${bestMatch.userName}! (${(bestMatch.confidence * 100).toFixed(1)}% match)`,
+          });
+          
+          setTimeout(() => {
+            setDetectionStatus('idle');
+            setLastDetection(null);
+          }, 4000);
+          
+        } else if (enrolledFaces.size > 0) {
+          // Face detected but not authorized
+          setDetectionStatus('unauthorized');
+          setLastDetection({ 
+            name: 'Unknown Individual', 
+            confidence: bestMatch.confidence,
+            isAuthorized: false,
+            timestamp: new Date()
+          });
+          
+          console.log(`🚨 Unauthorized person detected (best match: ${(bestMatch.confidence * 100).toFixed(1)}%)`);
+          
+          createAlert({
+            alert_type: 'Unauthorized Access Attempt',
+            severity: 'high',
+            details: `Unauthorized person detected at ${new Date().toLocaleTimeString()}. Best biometric match: ${(bestMatch.confidence * 100).toFixed(1)}%`,
+            source_device: 'Face Recognition System',
+            confidence_score: Math.round(bestMatch.confidence * 100)
+          });
+          
+          toast({
+            title: "🚨 Security Alert",
+            description: "Unauthorized access attempt detected and logged!",
+            variant: "destructive",
+          });
+          
+          setTimeout(() => {
+            setDetectionStatus('idle');
+            setLastDetection(null);
+          }, 6000);
+          
+        } else {
+          // No enrolled users
+          setDetectionStatus('unauthorized');
+          setLastDetection({ 
+            name: 'Unregistered Person', 
+            confidence: 0.5,
+            isAuthorized: false,
+            timestamp: new Date()
+          });
+          
+          createAlert({
+            alert_type: 'Person Detected - No Enrolled Users',
+            severity: 'medium',
+            details: `Person detected but no authorized users enrolled. Time: ${new Date().toLocaleTimeString()}`,
+            source_device: 'Face Recognition System',
+            confidence_score: 50
+          });
+          
+          toast({
+            title: "⚠️ Person Detected",
+            description: "No authorized users enrolled in system",
+            variant: "destructive",
+          });
+          
+          setTimeout(() => {
+            setDetectionStatus('idle');
+            setLastDetection(null);
+          }, 5000);
         }
         
         setScanningProgress(0);
-      }, 1200); // Analysis time
-    }, 800); // Scanning time
-  }, [authorizedUsers, isActive, cameraReady, videoElementReady, createAlert]);
+      }, 1000);
+    }, 600);
+  }, [authorizedUsers, isActive, cameraReady, createAlert, enrolledFaces, generateFaceSignature, compareFaceSignatures]);
 
   // Start detection loop
   useEffect(() => {
-    if (isActive && cameraReady && videoElementReady && !detectionIntervalRef.current) {
+    if (isActive && cameraReady && !detectionIntervalRef.current) {
       // Initial detection after camera stabilizes
       const initialDelay = setTimeout(() => {
-        if (isActive && cameraReady && videoElementReady) {
+        if (isActive && cameraReady) {
           performFaceDetection();
         }
       }, 2000);
       
-      // Regular detection every 6 seconds
+      // Regular detection every 4 seconds
       detectionIntervalRef.current = setInterval(() => {
-        if (isActive && cameraReady && videoElementReady && detectionStatus === 'idle') {
+        if (isActive && cameraReady && detectionStatus === 'idle') {
           performFaceDetection();
         }
-      }, 6000);
+      }, 4000);
 
       return () => {
         clearTimeout(initialDelay);
@@ -453,11 +466,11 @@ const FaceRecognition: React.FC = () => {
         detectionIntervalRef.current = null;
       }
     };
-  }, [isActive, cameraReady, videoElementReady, performFaceDetection, detectionStatus]);
+  }, [isActive, cameraReady, performFaceDetection, detectionStatus]);
 
-  // Enhanced user registration
+  // Enhanced user registration with face signature
   const registerNewUser = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || !newUserName.trim() || !cameraReady || !videoElementReady) {
+    if (!videoRef.current || !canvasRef.current || !newUserName.trim() || !cameraReady) {
       toast({
         title: "Registration Error",
         description: "Please ensure camera is active and enter a valid name",
@@ -479,7 +492,14 @@ const FaceRecognition: React.FC = () => {
       canvas.height = videoRef.current.videoHeight;
       ctx.drawImage(videoRef.current, 0, 0);
 
-      // Simulate advanced biometric processing
+      // Generate face signature
+      const faceSignature = generateFaceSignature(canvas);
+      
+      if (!faceSignature) {
+        throw new Error('No face detected for enrollment');
+      }
+
+      // Simulate processing steps
       const processingSteps = [
         'Capturing biometric image...',
         'Analyzing facial features...',
@@ -491,10 +511,10 @@ const FaceRecognition: React.FC = () => {
       
       for (let i = 0; i < processingSteps.length; i++) {
         setRegistrationProgress(Math.round((i + 1) * 100 / processingSteps.length));
-        await new Promise(resolve => setTimeout(resolve, 600));
+        await new Promise(resolve => setTimeout(resolve, 400));
       }
 
-      // Create high-quality biometric image
+      // Create biometric image
       const blob = await new Promise<Blob>((resolve) => {
         canvas.toBlob((blob) => {
           if (blob) resolve(blob);
@@ -504,10 +524,14 @@ const FaceRecognition: React.FC = () => {
       if (!blob) throw new Error('Failed to capture biometric data');
 
       const file = new File([blob], `${newUserName.trim()}_biometric.jpg`, { type: 'image/jpeg' });
-      await addAuthorizedUser(newUserName.trim(), file);
+      
+      // Add user with face signature
+      await addAuthorizedUser(newUserName.trim(), file, faceSignature);
       
       setNewUserName('');
       setRegistrationProgress(0);
+      
+      console.log(`✅ User enrolled: ${newUserName.trim()} with face signature`);
       
       toast({
         title: "✅ Registration Complete",
@@ -518,13 +542,13 @@ const FaceRecognition: React.FC = () => {
       console.error('Registration failed:', error);
       toast({
         title: "Registration Failed",
-        description: "Failed to register user. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to register user. Please try again.",
         variant: "destructive",
       });
     } finally {
       setIsRegistering(false);
     }
-  }, [newUserName, cameraReady, videoElementReady, addAuthorizedUser]);
+  }, [newUserName, cameraReady, addAuthorizedUser, generateFaceSignature]);
 
   // User deletion
   const handleDeleteUser = async (userId: string, userName: string) => {
@@ -548,22 +572,6 @@ const FaceRecognition: React.FC = () => {
     return () => stopCamera();
   }, [stopCamera]);
 
-  // Monitor video element readiness
-  useEffect(() => {
-    const checkElement = () => {
-      if (checkVideoElementReady()) {
-        setVideoElementReady(true);
-      }
-    };
-
-    checkElement();
-    
-    // Check periodically if element becomes available
-    const intervalId = setInterval(checkElement, 500);
-    
-    return () => clearInterval(intervalId);
-  }, [checkVideoElementReady]);
-
   return (
     <div className="space-y-6 px-2 sm:px-0">
       {/* Header */}
@@ -573,25 +581,25 @@ const FaceRecognition: React.FC = () => {
           <p className="text-muted-foreground">AI-powered biometric security system</p>
         </div>
         <div className="flex items-center justify-center sm:justify-end gap-3">
-          <Badge variant={isActive && cameraReady && videoElementReady ? 'default' : 'secondary'} className="flex items-center gap-2 px-3 py-1">
+          <Badge variant={isActive && cameraReady ? 'default' : 'secondary'} className="flex items-center gap-2 px-3 py-1">
             <div className={`w-2 h-2 rounded-full ${
-              isActive && cameraReady && videoElementReady 
+              isActive && cameraReady 
                 ? 'bg-green-500 animate-pulse' 
                 : isInitializing 
                 ? 'bg-yellow-500 animate-pulse' 
                 : 'bg-gray-500'
             }`} />
             <span className="font-medium">
-              {isActive && cameraReady && videoElementReady 
+              {isActive && cameraReady 
                 ? 'Active' 
                 : isInitializing 
                 ? 'Starting...' 
                 : 'Offline'}
             </span>
           </Badge>
-          {isActive && cameraReady && videoElementReady && (
+          {isActive && cameraReady && (
             <Badge variant="outline" className="text-xs">
-              Detections: {detectionCount}
+              Scans: {detectionCount} | Users: {enrolledFaces.size}
             </Badge>
           )}
         </div>
@@ -632,7 +640,7 @@ const FaceRecognition: React.FC = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Enhanced Controls */}
+            {/* Controls */}
             <div className="flex flex-wrap gap-2">
               <Button 
                 onClick={isActive ? stopCamera : initializeCamera}
@@ -669,42 +677,38 @@ const FaceRecognition: React.FC = () => {
               </Button>
             </div>
 
-            {/* Enhanced Video Feed */}
+            {/* Video Feed */}
             <div className="relative">
               <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden relative border-2 border-border">
                 
-                {/* Video Element - Always rendered when active */}
+                {/* Video Element */}
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
                   muted
                   className={`w-full h-full object-cover transition-all duration-700 ${
-                    isActive && showPreview && cameraReady && videoElementReady 
+                    isActive && showPreview && cameraReady 
                       ? 'opacity-100 scale-100' 
                       : 'opacity-0 scale-95'
                   }`}
                   style={{ 
-                    transform: isActive && showPreview && cameraReady && videoElementReady 
-                      ? 'scaleX(-1)' // Mirror effect for natural feeling
+                    transform: isActive && showPreview && cameraReady 
+                      ? 'scaleX(-1)' 
                       : 'scaleX(-1) scale(0.95)', 
-                    filter: 'contrast(1.1) brightness(1.05)' // Enhance image quality
+                    filter: 'contrast(1.1) brightness(1.05)'
                   }}
                 />
                 
                 <canvas ref={canvasRef} className="hidden" />
                 
                 {/* Loading State */}
-                {isActive && (!cameraReady || !videoElementReady) && (
+                {isActive && !cameraReady && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm">
                     <div className="text-center p-6">
                       <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-500" />
-                      <p className="font-medium text-white mb-1">
-                        {!videoElementReady ? 'Preparing video display...' : 'Initializing camera...'}
-                      </p>
-                      <p className="text-sm text-gray-300">
-                        {!videoElementReady ? 'Setting up video element...' : 'Activating biometric sensors...'}
-                      </p>
+                      <p className="font-medium text-white mb-1">Initializing camera...</p>
+                      <p className="text-sm text-gray-300">Activating biometric sensors...</p>
                     </div>
                   </div>
                 )}
@@ -744,7 +748,7 @@ const FaceRecognition: React.FC = () => {
                             <span className="font-semibold text-sm">Processing biometric template...</span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-2">
-                            Comparing against authorized user database
+                            Comparing against {enrolledFaces.size} authorized user(s)
                           </p>
                         </div>
                       </div>
