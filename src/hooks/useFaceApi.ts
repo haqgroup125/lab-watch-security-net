@@ -12,13 +12,13 @@ export const useFaceApi = () => {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
 
-  // Load face-api.js models from recommended CDN
+  // Load face-api.js models from the public/weights folder
   const loadModels = useCallback(async () => {
     if (modelsLoaded || loadingModels) return;
     setLoadingModels(true);
     try {
-      // You can optimize by hosting these models yourself if needed
-      const MODEL_URL = "https://cdn.jsdelivr.net/npm/face-api.js/weights";
+      // Load models from local public/weights folder
+      const MODEL_URL = "/weights";
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
@@ -75,4 +75,3 @@ export const useFaceApi = () => {
     compareDescriptors,
   };
 };
-
