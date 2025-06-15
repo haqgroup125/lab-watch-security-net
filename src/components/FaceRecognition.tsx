@@ -923,7 +923,7 @@ const FaceRecognition: React.FC = () => {
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm">
                     <div className="text-center p-6">
                       <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-500" />
-                      <p className="font-medium text-white mb-1">Initializing advanced biometric sensors...</p>
+                      <p className="font-medium text-xl text-white mb-1">Initializing advanced biometric sensors...</p>
                       <p className="text-sm text-gray-300">Calibrating facial recognition algorithms...</p>
                     </div>
                   </div>
