@@ -410,7 +410,8 @@ const FaceRecognition: React.FC = () => {
       setRegistrationProgress(80);
 
       // Save user with face_encoding as descriptor JSON
-      await addAuthorizedUser(newUserName.trim(), file, JSON.stringify(Array.from(descriptor)));
+      // Remove the third parameter!
+      await addAuthorizedUser(newUserName.trim(), file);
       setRegistrationProgress(100);
 
       setNewUserName("");
