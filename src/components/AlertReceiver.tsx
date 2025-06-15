@@ -17,7 +17,7 @@ const AlertReceiver = () => {
   const { toast } = useToast();
   const { alerts, fetchAlerts } = useSecuritySystem();
 
-  // No hardcoded alerts, just empty array
+  // Just real alerts, always starts empty if none in db
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
 
   useEffect(() => {
@@ -25,7 +25,7 @@ const AlertReceiver = () => {
   }, [fetchAlerts]);
 
   useEffect(() => {
-    // Fix object mapping to use SecurityAlert fields from Supabase:
+    // Map data from Supabase to UI-friendly format, no fake fields!
     if (alerts && Array.isArray(alerts)) {
       setRecentAlerts(
         alerts
@@ -33,33 +33,35 @@ const AlertReceiver = () => {
           .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
           .map(alert => ({
             ...alert,
-            // Normalize missing fields for compatibility with UI
             acknowledged: alert.acknowledged ?? false,
-            confidence: alert.confidence_score ?? 100, // Use confidence_score
+            confidence: alert.confidence_score ?? 100,
             image_url: alert.image_url ?? null,
-            location: alert.source_device || "System", // Use source_device as "location"
-            type: alert.alert_type ?? "system_status", // Use alert_type
+            location: alert.source_device || "System",
+            type: alert.alert_type ?? "system_status",
             severity: alert.severity ?? "low",
-            message: alert.details || "Alert", // Use details as the message; fallback to "Alert"
-            timestamp: alert.created_at // Use created_at as timestamp for display
+            message: alert.details || "Alert",
+            timestamp: alert.created_at
           }))
       );
     }
   }, [alerts]);
 
+  // Remove all simulation/fake-alert generation!
+  // No setInterval: the only alerts shown are those from backend
+
   useEffect(() => {
-    // Simulate auto-acknowledgment
+    // Simulate auto-acknowledgment for real alerts only
     if (autoAcknowledge) {
       const timeout = setTimeout(() => {
         const unacknowledgedIds = recentAlerts
           .filter(alert => !alert.acknowledged)
           .map(alert => alert.id);
-        
-        setRecentAlerts(prev => 
+
+        setRecentAlerts(prev =>
           prev.map(alert => ({ ...alert, acknowledged: true }))
         );
-        setAcknowledgedAlerts(prev => [...acknowledgedAlerts, ...unacknowledgedIds]);
-        
+        setAcknowledgedAlerts(prev => [...prev, ...unacknowledgedIds]);
+
         toast({
           title: "Alerts Auto-Acknowledged",
           description: `${unacknowledgedIds.length} alerts marked as reviewed`,
@@ -70,82 +72,16 @@ const AlertReceiver = () => {
     }
   }, [autoAcknowledge, recentAlerts, acknowledgedAlerts, toast]);
 
-  useEffect(() => {
-    fetchAlerts();
-    
-    // Enhanced simulation with more frequent updates
-    const interval = setInterval(() => {
-      // 8% chance of new alert every 15 seconds
-      if (Math.random() < 0.08) {
-        const alertTypes = [
-          {
-            type: "unauthorized_access",
-            severity: "high" as const,
-            message: "Unauthorized person detected",
-            location: "Lab Area B",
-            confidence: Math.floor(Math.random() * 30) + 70
-          },
-          {
-            type: "motion_detected", 
-            severity: "medium" as const,
-            message: "Unexpected motion detected",
-            location: "Corridor",
-            confidence: Math.floor(Math.random() * 20) + 80
-          },
-          {
-            type: "door_access",
-            severity: "medium" as const,
-            message: "Door access attempt",
-            location: "Main Door",
-            confidence: Math.floor(Math.random() * 15) + 85
-          }
-        ];
-
-        const randomAlert = alertTypes[Math.floor(Math.random() * alertTypes.length)];
-        const newAlert = {
-          id: `alert_${Date.now()}`,
-          ...randomAlert,
-          timestamp: new Date().toISOString(),
-          acknowledged: false,
-          image_url: null
-        };
-
-        setRecentAlerts(prev => [newAlert, ...prev.slice(0, 9)]);
-
-        if (isEnabled) {
-          // Enhanced notification with sound and vibration
-          if (soundEnabled) {
-            // Play notification sound
-            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Tzu2EbBD2Z2/PQfywFJJfH8NyQQQsUXrPq66hWFAlFl+Dzs2IcBTqR2+/MeS4FJY3A8deNOAYVa7/sz5hOEQxWr+Xqr2IbBjqJ1/TYeSsGJ5rC7tiQOAYSab3z159OFAFLnOTy');
-            audio.play().catch(() => {}); // Ignore errors if audio fails
-          }
-
-          if (vibrationEnabled && 'vibrate' in navigator) {
-            navigator.vibrate([200, 100, 200]);
-          }
-
-          toast({
-            title: `Security Alert: ${randomAlert.severity.toUpperCase()}`,
-            description: `${randomAlert.message} at ${randomAlert.location}`,
-            variant: randomAlert.severity === "high" ? "destructive" : "default",
-          });
-        }
-      }
-    }, 15000);
-
-    return () => clearInterval(interval);
-  }, [isEnabled, soundEnabled, vibrationEnabled, fetchAlerts, toast]);
-
   const handleAcknowledge = (alertId: string) => {
-    setRecentAlerts(prev => 
-      prev.map(alert => 
-        alert.id === alertId 
+    setRecentAlerts(prev =>
+      prev.map(alert =>
+        alert.id === alertId
           ? { ...alert, acknowledged: true }
           : alert
       )
     );
     setAcknowledgedAlerts(prev => [...prev, alertId]);
-    
+
     toast({
       title: "Alert Acknowledged",
       description: "Alert has been marked as reviewed",
@@ -156,12 +92,12 @@ const AlertReceiver = () => {
     const unacknowledgedIds = recentAlerts
       .filter(alert => !alert.acknowledged)
       .map(alert => alert.id);
-    
-    setRecentAlerts(prev => 
+
+    setRecentAlerts(prev =>
       prev.map(alert => ({ ...alert, acknowledged: true }))
     );
     setAcknowledgedAlerts(prev => [...prev, ...unacknowledgedIds]);
-    
+
     toast({
       title: "All Alerts Acknowledged",
       description: `${unacknowledgedIds.length} alerts marked as reviewed`,
