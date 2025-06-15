@@ -17,47 +17,36 @@ const AlertReceiver = () => {
   const { toast } = useToast();
   const { alerts, fetchAlerts } = useSecuritySystem();
 
-  // Enhanced alert simulation with more realistic data
-  const [recentAlerts, setRecentAlerts] = useState([
-    {
-      id: "alert_001",
-      type: "unauthorized_access",
-      severity: "high",
-      message: "Unauthorized person detected in Lab Area A",
-      timestamp: new Date().toISOString(),
-      location: "Main Entrance",
-      confidence: 87,
-      acknowledged: false,
-      image_url: null
-    },
-    {
-      id: "alert_002", 
-      type: "motion_detected",
-      severity: "medium",
-      message: "Motion detected outside normal hours",
-      timestamp: new Date(Date.now() - 300000).toISOString(),
-      location: "Storage Room",
-      confidence: 94,
-      acknowledged: true,
-      image_url: null
-    },
-    {
-      id: "alert_003",
-      type: "system_status",
-      severity: "low",
-      message: "Camera system operational check completed",
-      timestamp: new Date(Date.now() - 900000).toISOString(),
-      location: "System",
-      confidence: 100,
-      acknowledged: true,
-      image_url: null
-    }
-  ]);
+  // Start with no hardcoded recent alerts (was: [...fake objects...])
+  const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
 
   useEffect(() => {
     // Load alerts from database
     fetchAlerts();
   }, [fetchAlerts]);
+
+  useEffect(() => {
+    // When alerts (from backend) change, update recentAlerts
+    // Optionally sort by time, newest first
+    if (alerts && Array.isArray(alerts)) {
+      // Assign default fields if missing to avoid runtime errors
+      setRecentAlerts(
+        alerts
+          .slice() // shallow copy
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .map(alert => ({
+            ...alert,
+            acknowledged: alert.acknowledged || false,
+            confidence: alert.confidence ?? 100,
+            image_url: alert.image_url ?? null,
+            location: alert.location ?? (alert.source_device || "System"),
+            type: alert.type ?? "system_status",
+            severity: alert.severity ?? "low",
+            message: alert.details || alert.message || "Alert",
+          }))
+      );
+    }
+  }, [alerts]);
 
   useEffect(() => {
     // Simulate auto-acknowledgment
