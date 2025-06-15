@@ -248,7 +248,7 @@ const FaceRecognition: React.FC = () => {
       setCameraError(null);
       setCameraReady(false);
       console.log('🎥 Starting camera initialization...');
-
+      
       // Stop any existing stream first
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -866,83 +866,112 @@ const FaceRecognition: React.FC = () => {
                 )}
 
                 {/* Detection Overlays */}
-                {detectionStatus !== 'idle' && showPreview && isActive && cameraReady && (
-                  <div className={`absolute inset-0 transition-all duration-700 ease-in-out ${
-                    detectionStatus === 'authorized' 
-                      ? 'bg-green-500/20 border-4 border-green-400 shadow-green-400/50' 
-                      : detectionStatus === 'unauthorized'
-                      ? 'bg-red-500/20 border-4 border-red-400 shadow-red-400/50'
-                      : 'bg-blue-500/10 border-4 border-blue-400 shadow-blue-400/30'
-                  } shadow-2xl`}>
-                    
-                    {/* Scanning Interface */}
-                    {detectionStatus === 'scanning' && (
-                      <div className="absolute top-4 left-4 right-4">
-                        <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
-                          <div className="flex items-center gap-3 mb-3">
-                            <Scan className="h-5 w-5 animate-pulse text-blue-500" />
-                            <span className="font-semibold text-sm">Advanced biometric scanning...</span>
+                {isActive && cameraReady && showPreview && (
+                  <>
+                    {/* Bounding Box */}
+                    <div
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: '20%',
+                        top: '15%',
+                        width: '60%',
+                        height: '70%',
+                      }}
+                    >
+                      <div
+                        className={`w-full h-full rounded-lg border-4 relative transition-all duration-300 ${
+                          detectionStatus === 'authorized'
+                            ? 'border-green-400 shadow-[0_0_25px_8px] shadow-green-500/40'
+                            : detectionStatus === 'unauthorized'
+                            ? 'border-red-400 shadow-[0_0_25px_8px] shadow-red-500/40'
+                            : (detectionStatus === 'scanning' || detectionStatus === 'analyzing')
+                            ? 'border-blue-400 shadow-[0_0_25px_8px] shadow-blue-500/30 animate-pulse'
+                            : 'border-transparent'
+                        }`}
+                      >
+                        {lastDetection && (detectionStatus === 'authorized' || detectionStatus === 'unauthorized') && (
+                          <div className={`absolute -top-8 left-2 text-sm font-bold px-2 py-0.5 rounded ${
+                            detectionStatus === 'authorized' ? 'bg-green-500 text-primary-foreground' : 'bg-red-500 text-destructive-foreground'
+                          }`}>
+                            {detectionStatus === 'authorized' ? lastDetection.name : 'Unknown'} | {(lastDetection.confidence * 100).toFixed(1)}% Match
                           </div>
-                          <Progress value={scanningProgress} className="h-2" />
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Analyzing facial landmarks and geometric features
-                          </p>
-                        </div>
+                        )}
                       </div>
-                    )}
+                    </div>
 
-                    {/* Analysis Interface */}
-                    {detectionStatus === 'analyzing' && (
-                      <div className="absolute top-4 left-4 right-4">
-                        <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
-                          <div className="flex items-center gap-3">
-                            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-                            <span className="font-semibold text-sm">Processing biometric template...</span>
+                    {/* Status UIs */}
+                    {detectionStatus !== 'idle' && (
+                      <>
+                        {/* Scanning Interface */}
+                        {detectionStatus === 'scanning' && (
+                          <div className="absolute top-4 left-4 right-4">
+                            <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
+                              <div className="flex items-center gap-3 mb-3">
+                                <Scan className="h-5 w-5 animate-pulse text-blue-500" />
+                                <span className="font-semibold text-sm">Advanced biometric scanning...</span>
+                              </div>
+                              <Progress value={scanningProgress} className="h-2" />
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Analyzing facial landmarks and geometric features
+                              </p>
+                            </div>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Comparing against {enrolledFaces.size} authorized user template(s)
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                        )}
 
-                    {/* Results Display */}
-                    {(detectionStatus === 'authorized' || detectionStatus === 'unauthorized') && lastDetection && (
-                      <div className="absolute bottom-4 left-4 right-4">
-                        <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
-                          {detectionStatus === 'authorized' ? (
-                            <div className="flex items-center gap-3 text-green-600">
-                              <CheckCircle className="h-6 w-6 flex-shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <div className="font-bold text-lg">✅ ACCESS GRANTED</div>
-                                <div className="font-medium text-base truncate">{lastDetection.name}</div>
-                                <div className="text-sm opacity-90">
-                                  Biometric Match: {(lastDetection.confidence * 100).toFixed(1)}%
-                                </div>
-                                <div className="text-xs opacity-75">
-                                  {lastDetection.timestamp.toLocaleTimeString()}
-                                </div>
+                        {/* Analysis Interface */}
+                        {detectionStatus === 'analyzing' && (
+                          <div className="absolute top-4 left-4 right-4">
+                            <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
+                              <div className="flex items-center gap-3">
+                                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                                <span className="font-semibold text-sm">Processing biometric template...</span>
                               </div>
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Comparing against {enrolledFaces.size} authorized user template(s)
+                              </p>
                             </div>
-                          ) : (
-                            <div className="flex items-center gap-3 text-red-600">
-                              <AlertCircle className="h-6 w-6 flex-shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <div className="font-bold text-lg">🚨 ACCESS DENIED</div>
-                                <div className="font-medium text-base">Unauthorized Individual</div>
-                                <div className="text-sm opacity-90">
-                                  Security alert has been created and logged
+                          </div>
+                        )}
+
+                        {/* Results Display */}
+                        {(detectionStatus === 'authorized' || detectionStatus === 'unauthorized') && lastDetection && (
+                          <div className="absolute bottom-4 left-4 right-4">
+                            <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
+                              {detectionStatus === 'authorized' ? (
+                                <div className="flex items-center gap-3 text-green-600">
+                                  <CheckCircle className="h-6 w-6 flex-shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-bold text-lg">✅ ACCESS GRANTED</div>
+                                    <div className="font-medium text-base truncate">{lastDetection.name}</div>
+                                    <div className="text-sm opacity-90">
+                                      Biometric Match: {(lastDetection.confidence * 100).toFixed(1)}%
+                                    </div>
+                                    <div className="text-xs opacity-75">
+                                      {lastDetection.timestamp.toLocaleTimeString()}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="text-xs opacity-75">
-                                  {lastDetection.timestamp.toLocaleTimeString()}
+                              ) : (
+                                <div className="flex items-center gap-3 text-red-600">
+                                  <AlertCircle className="h-6 w-6 flex-shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-bold text-lg">🚨 ACCESS DENIED</div>
+                                    <div className="font-medium text-base">Unauthorized Individual</div>
+                                    <div className="text-sm opacity-90">
+                                      Security alert has been created and logged
+                                    </div>
+                                    <div className="text-xs opacity-75">
+                                      {lastDetection.timestamp.toLocaleTimeString()}
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </div>
+                          </div>
+                        )}
+                      </>
                     )}
-                  </div>
+                  </>
                 )}
 
                 {/* Offline State */}
