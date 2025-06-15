@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,9 @@ import { Camera, Upload, User, UserCheck, UserX, Loader2, AlertCircle, CheckCirc
 import { useSecuritySystem } from "@/hooks/useSecuritySystem";
 import { toast } from "@/hooks/use-toast";
 import { useFaceApi, DetectedFace } from "@/hooks/useFaceApi";
+import FaceCameraFeed from "./FaceCameraFeed";
+import EnrollUserForm from "./EnrollUserForm";
+import AuthorizedUsersList from "./AuthorizedUsersList";
 
 // -- FaceRecognition now with real browser-based face detection powered by face-api.js
 
@@ -505,6 +507,7 @@ const FaceRecognition: React.FC = () => {
           <p className="text-muted-foreground">Live biometric security with real deep learning in browser</p>
         </div>
         <div className="flex items-center justify-center sm:justify-end gap-3">
+          {/* Badge code as original */}
           <Badge variant={isActive && cameraReady ? "default" : "secondary"} className="flex items-center gap-2 px-3 py-1">
             <div
               className={`w-2 h-2 rounded-full ${
@@ -542,310 +545,42 @@ const FaceRecognition: React.FC = () => {
         </Alert>
       )}
 
+      {/* Camera Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Camera Section */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5" />
-              Live Security Feed (AI-Powered)
-            </CardTitle>
-            <CardDescription>True deep learning face recognition in the browser</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Controls */}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={isActive ? stopCamera : initializeCamera}
-                variant={isActive ? "destructive" : "default"}
-                disabled={isInitializing}
-                className="flex-1 sm:flex-none"
-              >
-                {isInitializing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Initializing...
-                  </>
-                ) : isActive ? (
-                  <>
-                    <Square className="h-4 w-4 mr-2" />
-                    Stop Security
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4 mr-2" />
-                    Start Security
-                  </>
-                )}
-              </Button>
-              <Button
-                onClick={() => setShowPreview(!showPreview)}
-                variant="outline"
-                size="default"
-                className="flex-1 sm:flex-none"
-                disabled={!isActive}
-              >
-                {showPreview ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-                {showPreview ? "Hide Feed" : "Show Feed"}
-              </Button>
-            </div>
-            {/* Video Feed */}
-            <div className="relative">
-              <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden relative border-2 border-border">
-                {/* Video Element */}
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover transition-all duration-700 ${
-                    isActive && showPreview && cameraReady ? "opacity-100 scale-100" : "opacity-0 scale-95"
-                  }`}
-                  style={{
-                    transform:
-                      isActive && showPreview && cameraReady ? "scaleX(-1)" : "scaleX(-1) scale(0.95)",
-                    filter: "contrast(1.1) brightness(1.05)",
-                  }}
-                />
-
-                <canvas ref={canvasRef} className="hidden" />
-                {/* Real face detection overlay */}
-                {isActive && cameraReady && showPreview && liveFaceBox && (
-                  <div
-                    className="absolute border-4 rounded-lg"
-                    style={{
-                      left: `${liveFaceBox.left}%`,
-                      top: `${liveFaceBox.top}%`,
-                      width: `${liveFaceBox.width}%`,
-                      height: `${liveFaceBox.height}%`,
-                      borderColor:
-                        detectionStatus === "authorized"
-                          ? "limegreen"
-                          : detectionStatus === "unauthorized"
-                          ? "#f44141"
-                          : "#4f8bf4",
-                      zIndex: 10,
-                      boxShadow:
-                        detectionStatus === "authorized"
-                          ? "0 0 24px 3px #00ff00aa"
-                          : detectionStatus === "unauthorized"
-                          ? "0 0 24px 3px #ff3c3caa"
-                          : "0 0 12px 2px #4f8bf444",
-                      pointerEvents: "none",
-                    }}
-                  />
-                )}
-                {/* Label above face box */}
-                {isActive &&
-                  cameraReady &&
-                  showPreview &&
-                  liveFaceBox &&
-                  (detectionStatus === "authorized" || detectionStatus === "unauthorized") &&
-                  lastDetection && (
-                    <div
-                      className="absolute"
-                      style={{
-                        left: `${liveFaceBox.left}%`,
-                        top: `${Math.max(liveFaceBox.top - 7, 0)}%`,
-                        width: `${liveFaceBox.width}%`,
-                        textAlign: "center",
-                        zIndex: 20,
-                        fontFamily: "monospace, monospace",
-                      }}
-                    >
-                      <span
-                        className="text-base font-semibold px-2 py-0.5 rounded shadow"
-                        style={{
-                          background:
-                            detectionStatus === "authorized"
-                              ? "rgba(50,250,50,0.82)"
-                              : "rgba(250,60,60,0.82)",
-                          color: "#fff",
-                          border:
-                            detectionStatus === "authorized"
-                              ? "2px solid #05f705"
-                              : "2px solid #fa3c3c",
-                          letterSpacing: "0.5px",
-                        }}
-                      >
-                        {detectionStatus === "authorized" ? lastDetection.name : "Unknown"}
-                        {" "}
-                        {(lastDetection.confidence * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  )}
-                {/* Loading overlay */}
-                {isActive && !cameraReady && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm">
-                    <div className="text-center p-6">
-                      <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-500" />
-                      <p className="font-medium text-xl text-white mb-1">
-                        Initializing biometric sensors and AI models...
-                      </p>
-                      <p className="text-sm text-gray-300">Loading deep learning face recognition...</p>
-                    </div>
-                  </div>
-                )}
-                {/* Offline overlay */}
-                {!isActive && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/90 to-slate-800/90">
-                    <div className="text-center p-8">
-                      <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-muted-foreground/20 flex items-center justify-center">
-                        <Shield className="h-10 w-10 text-muted-foreground" />
-                      </div>
-                      <p className="font-bold text-xl text-white mb-2">Security System Offline</p>
-                      <p className="text-sm text-gray-300 mb-4">Face recognition monitoring is currently disabled</p>
-                      <Button onClick={initializeCamera} variant="secondary" size="sm" disabled={isInitializing}>
-                        <Play className="h-4 w-4 mr-2" />
-                        Start Monitoring
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* Detection Status alert */}
-            {lastDetection && (
-              <Alert
-                className={`border-2 transition-all duration-300 ${
-                  lastDetection.isAuthorized
-                    ? "border-green-400 bg-green-50 dark:bg-green-950"
-                    : "border-red-400 bg-red-50 dark:bg-red-950"
-                }`}
-              >
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <span
-                        className={`font-semibold ${
-                          lastDetection.isAuthorized
-                            ? "text-green-700 dark:text-green-300"
-                            : "text-red-700 dark:text-red-300"
-                        }`}
-                      >
-                        {lastDetection.name}
-                      </span>
-                      <span className="text-sm ml-2">{(lastDetection.confidence * 100).toFixed(1)}% biometric confidence</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{lastDetection.timestamp.toLocaleTimeString()}</span>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
-        {/* Control Panel */}
+        <FaceCameraFeed
+          isActive={isActive}
+          cameraReady={cameraReady}
+          isInitializing={isInitializing}
+          showPreview={showPreview}
+          setShowPreview={setShowPreview}
+          detectionCount={detectionCount}
+          enrolledUserCount={enrolledDescriptors.length}
+          detectionStatus={detectionStatus}
+          liveFaceBox={liveFaceBox}
+          lastDetection={lastDetection}
+          initializeCamera={initializeCamera}
+          stopCamera={stopCamera}
+          cameraError={cameraError}
+          videoRef={videoRef}
+          canvasRef={canvasRef}
+        />
+        {/* Controls */}
         <div className="space-y-6">
-          {/* User Registration */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2">
-                <UserCheck className="h-5 w-5" />
-                Enroll New User
-              </CardTitle>
-              <CardDescription>Register authorized personnel with real face descriptor</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="userName">Full Name</Label>
-                <Input
-                  id="userName"
-                  value={newUserName}
-                  onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="Enter full name"
-                  disabled={isRegistering}
-                />
-              </div>
-              {isRegistering && (
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Processing biometric enrollment...</span>
-                    <span>{registrationProgress}%</span>
-                  </div>
-                  <Progress value={registrationProgress} className="h-2" />
-                </div>
-              )}
-              <Button
-                onClick={registerNewUser}
-                disabled={!isActive || !cameraReady || !modelsLoaded || !newUserName.trim() || isRegistering}
-                className="w-full"
-              >
-                {isRegistering ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Creating Biometric Template...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Capture & Enroll (AI Biometric)
-                  </>
-                )}
-              </Button>
-              {(!isActive || !cameraReady || !modelsLoaded) && (
-                <p className="text-xs text-muted-foreground text-center">Camera and AI models must be ready to enroll users</p>
-              )}
-            </CardContent>
-          </Card>
-          {/* Authorized Users */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                Authorized Users ({enrolledDescriptors.length})
-              </CardTitle>
-              <CardDescription>Manage AI biometric access permissions</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-80 overflow-y-auto">
-                {loading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                    <span className="text-sm">Loading authorized users...</span>
-                  </div>
-                ) : enrolledDescriptors.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <UserX className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p className="font-medium mb-1">No Enrolled Users</p>
-                    <p className="text-xs">Enroll authorized personnel to enable security</p>
-                  </div>
-                ) : (
-                  enrolledDescriptors.map((user, index) => (
-                    <div key={user.id}>
-                      <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border hover:bg-muted/50 transition-colors">
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          {user.image_url && (
-                            <img
-                              src={user.image_url}
-                              alt={user.name}
-                              className="w-12 h-12 rounded-full object-cover border-2 border-background shadow-sm"
-                            />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-sm truncate">{user.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Enrolled {new Date(user.created_at).toLocaleDateString()}
-                            </p>
-                            <p className="text-xs text-green-600 font-medium">✓ AI Face Descriptor Active</p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteUser(user.id, user.name)}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {index < enrolledDescriptors.length - 1 && <Separator className="my-2" />}
-                    </div>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <EnrollUserForm
+            newUserName={newUserName}
+            setNewUserName={setNewUserName}
+            isRegistering={isRegistering}
+            registrationProgress={registrationProgress}
+            registerNewUser={registerNewUser}
+            isActive={isActive}
+            cameraReady={cameraReady}
+            modelsLoaded={modelsLoaded}
+          />
+          <AuthorizedUsersList
+            enrolledDescriptors={enrolledDescriptors}
+            loading={loading}
+            handleDeleteUser={handleDeleteUser}
+          />
         </div>
       </div>
     </div>
