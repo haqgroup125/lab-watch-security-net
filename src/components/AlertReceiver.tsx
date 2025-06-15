@@ -17,32 +17,31 @@ const AlertReceiver = () => {
   const { toast } = useToast();
   const { alerts, fetchAlerts } = useSecuritySystem();
 
-  // Start with no hardcoded recent alerts (was: [...fake objects...])
+  // No hardcoded alerts, just empty array
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
 
   useEffect(() => {
-    // Load alerts from database
     fetchAlerts();
   }, [fetchAlerts]);
 
   useEffect(() => {
-    // When alerts (from backend) change, update recentAlerts
-    // Optionally sort by time, newest first
+    // Fix object mapping to use SecurityAlert fields from Supabase:
     if (alerts && Array.isArray(alerts)) {
-      // Assign default fields if missing to avoid runtime errors
       setRecentAlerts(
         alerts
           .slice() // shallow copy
-          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
           .map(alert => ({
             ...alert,
-            acknowledged: alert.acknowledged || false,
-            confidence: alert.confidence ?? 100,
+            // Normalize missing fields for compatibility with UI
+            acknowledged: alert.acknowledged ?? false,
+            confidence: alert.confidence_score ?? 100, // Use confidence_score
             image_url: alert.image_url ?? null,
-            location: alert.location ?? (alert.source_device || "System"),
-            type: alert.type ?? "system_status",
+            location: alert.source_device || "System", // Use source_device as "location"
+            type: alert.alert_type ?? "system_status", // Use alert_type
             severity: alert.severity ?? "low",
-            message: alert.details || alert.message || "Alert",
+            message: alert.details || "Alert", // Use details as the message; fallback to "Alert"
+            timestamp: alert.created_at // Use created_at as timestamp for display
           }))
       );
     }
