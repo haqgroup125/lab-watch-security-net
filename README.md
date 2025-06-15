@@ -24,34 +24,52 @@ A **production-ready security system** with **real face recognition**, ESP32 har
 - **Modern web browser** with camera support
 - **ESP32 development board** (optional for hardware integration)
 
-### Installation
+### 1. Clone and Install Dependencies
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd security-system
-   ```
+```bash
+git clone <repository-url>
+cd security-system
+npm install
+```
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+### 2. Download Face Recognition Model Weights
 
-3. **Set up environment variables**
-   ```bash
-   cp .env.example .env.local
-   # Edit .env.local with your Supabase credentials
-   ```
+**This step is required for local face recognition features to work!**
 
-4. **Start the development server**
-   ```bash
-   npm run dev
-   ```
+- [Download model weights here (GitHub)](https://github.com/justadudewhohacks/face-api.js-models)
+- Copy the entire `weights` folder into your project's `public/` directory:
+  ```
+  public/
+    weights/
+      tiny_face_detector_model-weights_manifest.json
+      tiny_face_detector_model-shard1
+      face_landmark_68_model-weights_manifest.json
+      face_landmark_68_model-shard1
+      face_recognition_model-weights_manifest.json
+      face_recognition_model-shard1
+      ...
+  ```
+- The app expects to find model files at `/weights` during runtime.
 
-5. **Open your browser**
-   ```
-   http://localhost:8080
-   ```
+**Why?**  
+Running face detection & recognition on your machine (offline) requires these pre-trained models. The app does not download them automatically for security and performance reasons.
+
+### 3. Set up environment variables
+
+```bash
+cp .env.example .env.local
+# Edit .env.local with your Supabase credentials
+```
+
+### 4. Start the development server
+
+```bash
+npm run dev
+```
+
+### 5. Open your browser
+
+Go to: [http://localhost:8080](http://localhost:8080)
 
 ---
 
@@ -238,7 +256,8 @@ ESP32 Connections:
 
 ## 🔍 Troubleshooting
 
-### Common Issues
+**Common Local Face Recognition Issue:**  
+If you get errors about missing model files (`.bin`, `.json`) in your browser console, ensure you have completed **Step 2** above by downloading and placing the `weights` folder in your `public/` directory.
 
 **Camera not working:**
 - Ensure HTTPS or localhost for camera permissions
@@ -315,3 +334,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 **🔒 Professional Security System v2.0** - 
                                .....MADE BY M.ABUBAKKAR....
+
