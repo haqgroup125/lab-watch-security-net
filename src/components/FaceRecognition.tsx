@@ -832,7 +832,7 @@ const FaceRecognition: React.FC = () => {
             {/* Video Feed */}
             <div className="relative">
               <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl overflow-hidden relative border-2 border-border">
-                
+
                 {/* Video Element */}
                 <video
                   ref={videoRef}
@@ -851,10 +851,74 @@ const FaceRecognition: React.FC = () => {
                     filter: 'contrast(1.1) brightness(1.05)'
                   }}
                 />
-                
+
                 <canvas ref={canvasRef} className="hidden" />
-                
-                {/* Loading State */}
+
+                {/* NEW: Simple "face bounding box" and label, inspired by open source tools */}
+                {isActive && cameraReady && showPreview && (
+                  <>
+                    {/* Central face bounding box */}
+                    <div
+                      className="absolute"
+                      style={{
+                        left: '28%',
+                        top: '18%',
+                        width: '44%',
+                        height: '60%',
+                        border: `3px solid ${
+                          detectionStatus === 'authorized'
+                            ? 'limegreen'
+                            : detectionStatus === 'unauthorized'
+                            ? '#f44141'
+                            : '#4f8bf4'
+                        }`,
+                        borderRadius: '8px',
+                        zIndex: 10,
+                        boxShadow:
+                          detectionStatus === 'authorized'
+                            ? '0 0 24px 3px #00ff00aa'
+                            : detectionStatus === 'unauthorized'
+                            ? '0 0 24px 3px #ff3c3caa'
+                            : '0 0 12px 2px #4f8bf444',
+                        pointerEvents: 'none'
+                      }}
+                    />
+
+                    {(detectionStatus === 'authorized' || detectionStatus === 'unauthorized') && lastDetection && (
+                      <div
+                        className="absolute"
+                        style={{
+                          left: '28%',
+                          top: '11%', // just above the box
+                          width: '44%',
+                          textAlign: 'center',
+                          zIndex: 20,
+                          fontFamily: 'monospace, monospace'
+                        }}
+                      >
+                        <span
+                          className="text-base font-semibold px-2 py-0.5 rounded shadow"
+                          style={{
+                            background: detectionStatus === 'authorized' ? 'rgba(50,250,50,0.82)' : 'rgba(250,60,60,0.82)',
+                            color: '#fff',
+                            border: detectionStatus === 'authorized'
+                              ? '2px solid #05f705'
+                              : '2px solid #fa3c3c',
+                            letterSpacing: '0.5px'
+                          }}
+                        >
+                          {detectionStatus === 'authorized'
+                            ? lastDetection.name
+                            : 'Unknown'}
+                          {' '}
+                          {(lastDetection.confidence * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* ... keep existing loading/offline overlays as before ... */}
                 {isActive && !cameraReady && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm">
                     <div className="text-center p-6">
@@ -865,116 +929,11 @@ const FaceRecognition: React.FC = () => {
                   </div>
                 )}
 
-                {/* Detection Overlays */}
-                {isActive && cameraReady && showPreview && (
-                  <>
-                    {/* Bounding Box */}
-                    <div
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: '20%',
-                        top: '15%',
-                        width: '60%',
-                        height: '70%',
-                      }}
-                    >
-                      <div
-                        className={`w-full h-full rounded-lg border-4 relative transition-all duration-300 ${
-                          detectionStatus === 'authorized'
-                            ? 'border-green-400 shadow-[0_0_25px_8px] shadow-green-500/40'
-                            : detectionStatus === 'unauthorized'
-                            ? 'border-red-400 shadow-[0_0_25px_8px] shadow-red-500/40'
-                            : (detectionStatus === 'scanning' || detectionStatus === 'analyzing')
-                            ? 'border-blue-400 shadow-[0_0_25px_8px] shadow-blue-500/30 animate-pulse'
-                            : 'border-transparent'
-                        }`}
-                      >
-                        {lastDetection && (detectionStatus === 'authorized' || detectionStatus === 'unauthorized') && (
-                          <div className={`absolute -top-8 left-2 text-sm font-bold px-2 py-0.5 rounded ${
-                            detectionStatus === 'authorized' ? 'bg-green-500 text-primary-foreground' : 'bg-red-500 text-destructive-foreground'
-                          }`}>
-                            {detectionStatus === 'authorized' ? lastDetection.name : 'Unknown'} | {(lastDetection.confidence * 100).toFixed(1)}% Match
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Status UIs */}
-                    {detectionStatus !== 'idle' && (
-                      <>
-                        {/* Scanning Interface */}
-                        {detectionStatus === 'scanning' && (
-                          <div className="absolute top-4 left-4 right-4">
-                            <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
-                              <div className="flex items-center gap-3 mb-3">
-                                <Scan className="h-5 w-5 animate-pulse text-blue-500" />
-                                <span className="font-semibold text-sm">Advanced biometric scanning...</span>
-                              </div>
-                              <Progress value={scanningProgress} className="h-2" />
-                              <p className="text-xs text-muted-foreground mt-2">
-                                Analyzing facial landmarks and geometric features
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Analysis Interface */}
-                        {detectionStatus === 'analyzing' && (
-                          <div className="absolute top-4 left-4 right-4">
-                            <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
-                              <div className="flex items-center gap-3">
-                                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-                                <span className="font-semibold text-sm">Processing biometric template...</span>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-2">
-                                Comparing against {enrolledFaces.size} authorized user template(s)
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Results Display */}
-                        {(detectionStatus === 'authorized' || detectionStatus === 'unauthorized') && lastDetection && (
-                          <div className="absolute bottom-4 left-4 right-4">
-                            <div className="bg-background/95 backdrop-blur-sm rounded-lg p-4 border shadow-lg">
-                              {detectionStatus === 'authorized' ? (
-                                <div className="flex items-center gap-3 text-green-600">
-                                  <CheckCircle className="h-6 w-6 flex-shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="font-bold text-lg">✅ ACCESS GRANTED</div>
-                                    <div className="font-medium text-base truncate">{lastDetection.name}</div>
-                                    <div className="text-sm opacity-90">
-                                      Biometric Match: {(lastDetection.confidence * 100).toFixed(1)}%
-                                    </div>
-                                    <div className="text-xs opacity-75">
-                                      {lastDetection.timestamp.toLocaleTimeString()}
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-3 text-red-600">
-                                  <AlertCircle className="h-6 w-6 flex-shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="font-bold text-lg">🚨 ACCESS DENIED</div>
-                                    <div className="font-medium text-base">Unauthorized Individual</div>
-                                    <div className="text-sm opacity-90">
-                                      Security alert has been created and logged
-                                    </div>
-                                    <div className="text-xs opacity-75">
-                                      {lastDetection.timestamp.toLocaleTimeString()}
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </>
+                {/* ... keep existing code for status UIs and detection overlays, but minimize them if desired ... */}
+                {false && detectionStatus !== 'idle' && (
+                  // (optionally show floating overlays if you want, but main label is on video)
                 )}
 
-                {/* Offline State */}
                 {!isActive && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/90 to-slate-800/90">
                     <div className="text-center p-8">
@@ -990,6 +949,7 @@ const FaceRecognition: React.FC = () => {
                     </div>
                   </div>
                 )}
+
               </div>
             </div>
 
