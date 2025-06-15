@@ -854,7 +854,7 @@ const FaceRecognition: React.FC = () => {
 
                 <canvas ref={canvasRef} className="hidden" />
 
-                {/* NEW: Simple "face bounding box" and label, inspired by open source tools */}
+                {/* Face detection overlay */}
                 {isActive && cameraReady && showPreview && (
                   <>
                     {/* Central face bounding box */}
@@ -889,7 +889,7 @@ const FaceRecognition: React.FC = () => {
                         className="absolute"
                         style={{
                           left: '28%',
-                          top: '11%', // just above the box
+                          top: '11%',
                           width: '44%',
                           textAlign: 'center',
                           zIndex: 20,
@@ -918,7 +918,7 @@ const FaceRecognition: React.FC = () => {
                   </>
                 )}
 
-                {/* ... keep existing loading/offline overlays as before ... */}
+                {/* Loading overlay */}
                 {isActive && !cameraReady && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/95 to-slate-800/95 backdrop-blur-sm">
                     <div className="text-center p-6">
@@ -929,11 +929,7 @@ const FaceRecognition: React.FC = () => {
                   </div>
                 )}
 
-                {/* ... keep existing code for status UIs and detection overlays, but minimize them if desired ... */}
-                {false && detectionStatus !== 'idle' && (
-                  // (optionally show floating overlays if you want, but main label is on video)
-                )}
-
+                {/* Offline overlay */}
                 {!isActive && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900/90 to-slate-800/90">
                     <div className="text-center p-8">
